@@ -1,4 +1,4 @@
-from master_processor import load_master
+from backend.services.master_processor import load_master
 
 
 master_path = r"data/Metadata Template(1).xlsx"

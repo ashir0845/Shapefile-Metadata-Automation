@@ -1,4 +1,4 @@
-from dbf_processor import process_dbf
+from backend.services.dbf_processor import process_dbf
 
 
 dbf_path = r"data/BLOCK__INDIA_2024.dbf"

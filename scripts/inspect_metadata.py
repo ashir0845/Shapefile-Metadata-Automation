@@ -1,4 +1,4 @@
-from metadata_builder import build_metadata
+from backend.services.metadata_builder import build_metadata
 
 
 dbf_path = r"data/BLOCK_2024/BLOCK__INDIA_2024.dbf"
@@ -25,6 +25,11 @@ for field in result["fields"]:
     print("\n--------------------------------")
     print("Attribute:", field["name"])
     print("DBF Type:", field["dbf_type"])
+
+    # Matching information
+    print("Match Type:", field.get("match_type"))
+    print("Master Field:", field.get("master_field"))
+
     print("Min:", field["min"])
     print("Max:", field["max"])
     print("Definition:", field["definition"])
