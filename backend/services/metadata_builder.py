@@ -1,135 +1,447 @@
-from backend.services.dbf_processor import process_dbf
-from backend.services.master_processor import load_master
-from backend.services.attribute_rules import get_attribute_unit
+import os
+from typing import Any, Dict, List
 
-# ---------------------------------------------------------
-# Explicit mappings for DBF fields whose names differ
-# from the corresponding Master attribute names.
-# ---------------------------------------------------------
-
-FIELD_MAPPING = {
-    "TOT_HH": "TOT_NM_HH",
-}
+import openpyxl
+import shapefile
 
 
-def build_metadata(dbf_path, master_path):
+# =========================================================
+# Helpers
+# =========================================================
 
-    dbf_data = process_dbf(dbf_path)
-    master_data = load_master(master_path)
+def safe_string(value: Any) -> str:
+    """
+    Convert Excel / DBF values safely to strings.
+    """
 
-    combined_fields = []
+    if value is None:
+        return ""
 
-    for field in dbf_data["fields"]:
+    return str(value).strip()
 
-        field_name = field["name"]
+
+def normalize_text(value: Any) -> str:
+    """
+    Normalize text for comparison.
+    """
+
+    return (
+        safe_string(value)
+        .lower()
+        .replace("_", " ")
+        .replace("-", " ")
+        .strip()
+    )
+
+
+def is_attribute_section_start(value: Any) -> bool:
+    """
+    Detect Attribute #1.
+    """
+
+    text = normalize_text(value)
+
+    return text.startswith("attribute #1")
+
+
+# =========================================================
+# Read template main fields
+# =========================================================
+
+def read_main_template_fields(
+    master_path: str,
+) -> List[Dict[str, Any]]:
+    """
+    Read all metadata template fields before Attribute #1.
+
+    The template structure is:
+
+        Column A = Field
+        Column B = Value
+        Column C = Status
+
+    Example:
+
+        Originator
+        ML Infomap
+        Fixed
+
+        Publication Date
+        31st March 2025
+        Editable
+
+    Attribute #1 marks the beginning of the
+    shapefile attribute section.
+    """
+
+    if not os.path.exists(master_path):
+        raise FileNotFoundError(
+            f"Metadata template not found: {master_path}"
+        )
+
+    workbook = openpyxl.load_workbook(
+        master_path,
+        data_only=True
+    )
+
+    # -----------------------------------------------------
+    # Prefer the actual metadata sheet
+    # -----------------------------------------------------
+
+    sheet_name = None
+
+    preferred_names = [
+        "Meatadata_State_2001",
+        "Metadata_State_2001",
+        "Metadata",
+    ]
+
+    for name in preferred_names:
+        if name in workbook.sheetnames:
+            sheet_name = name
+            break
+
+    # Fallback to first sheet
+    if sheet_name is None:
+        sheet_name = workbook.sheetnames[0]
+
+    ws = workbook[sheet_name]
+
+    main_fields: List[Dict[str, Any]] = []
+
+    for row in ws.iter_rows(
+        min_row=1,
+        max_col=3,
+        values_only=True,
+    ):
+        field_name = row[0]
+        value = row[1]
+        status = row[2]
+
+        field_name = safe_string(field_name)
+        value = safe_string(value)
+        status = safe_string(status)
+
+        if not field_name:
+            continue
 
         # -------------------------------------------------
-        # Check exact match first
+        # Stop at Attribute #1
         # -------------------------------------------------
 
-        if field_name in master_data:
-
-            master_field_name = field_name
-            match_type = "Exact"
+        if is_attribute_section_start(field_name):
+            break
 
         # -------------------------------------------------
-        # If exact match doesn't exist,
-        # check explicit field mapping
+        # Ignore completely empty rows
         # -------------------------------------------------
 
-        elif field_name in FIELD_MAPPING:
-
-            master_field_name = FIELD_MAPPING[field_name]
-            match_type = "Mapped"
+        if not value and not status:
+            continue
 
         # -------------------------------------------------
-        # No match
+        # Section headings
+        #
+        # Example:
+        # Entity #1
+        #
+        # These are not normal editable fields.
         # -------------------------------------------------
+
+        if field_name.lower().startswith("entity #"):
+            continue
+
+        editable = (
+            status.lower() == "editable"
+        )
+
+        main_fields.append(
+            {
+                "name": field_name,
+
+                "value": value,
+
+                "source": "Template",
+
+                "remarks": status,
+
+                "editable": editable,
+
+                "type": "main",
+            }
+        )
+
+    return main_fields
+
+
+# =========================================================
+# Read shapefile attributes
+# =========================================================
+
+def read_shapefile_attributes(
+    dbf_path: str,
+    master_path: str,
+) -> List[Dict[str, Any]]:
+    """
+    Read shapefile DBF fields.
+
+    The master sheet is used to find matching
+    definitions and sources.
+    """
+
+    if not os.path.exists(dbf_path):
+        raise FileNotFoundError(
+            f"DBF file not found: {dbf_path}"
+        )
+
+    # -----------------------------------------------------
+    # Read DBF
+    # -----------------------------------------------------
+
+    reader = shapefile.Reader(
+        dbf=dbf_path
+    )
+
+    fields = reader.fields[1:]
+
+    records = reader.records()
+
+    # -----------------------------------------------------
+    # Build master lookup
+    # -----------------------------------------------------
+
+    master_lookup = {}
+
+    if os.path.exists(master_path):
+
+        workbook = openpyxl.load_workbook(
+            master_path,
+            data_only=True
+        )
+
+        # Prefer Master sheet
+        if "Master" in workbook.sheetnames:
+            master_ws = workbook["Master"]
+        else:
+            master_ws = workbook[
+                workbook.sheetnames[-1]
+            ]
+
+        # Expected Master columns:
+        #
+        # A = Entity
+        # B = Attribute
+        # C = Label
+        # D = Attribute Definition
+        # E = Attribute Definition Source
+
+        for row in master_ws.iter_rows(
+            min_row=2,
+            max_col=5,
+            values_only=True,
+        ):
+
+            entity = safe_string(row[0])
+
+            attribute = safe_string(row[1])
+
+            label = safe_string(row[2])
+
+            definition = safe_string(row[3])
+
+            definition_source = safe_string(
+                row[4]
+            )
+
+            if not attribute:
+                continue
+
+            master_lookup[
+                normalize_text(attribute)
+            ] = {
+                "entity": entity,
+                "attribute": attribute,
+                "label": label,
+                "definition": definition,
+                "definition_source": (
+                    definition_source
+                ),
+            }
+
+    # -----------------------------------------------------
+    # Convert DBF fields
+    # -----------------------------------------------------
+
+    result = []
+
+    for field in fields:
+
+        name = field[0]
+
+        dbf_type = field[1]
+
+        size = field[2]
+
+        decimal = field[3]
+
+        key = normalize_text(name)
+
+        master = master_lookup.get(key)
+
+        master_match = master is not None
+
+        if master_match:
+
+            definition = master.get(
+                "definition",
+                ""
+            )
+
+            definition_source = master.get(
+                "definition_source",
+                ""
+            )
 
         else:
 
-            master_field_name = None
-            match_type = "No Match"
+            definition = ""
+
+            definition_source = ""
 
         # -------------------------------------------------
-        # Get Master metadata
+        # Determine match type
         # -------------------------------------------------
 
-        master_match = (
-            master_data.get(master_field_name)
-            if master_field_name
+        match_type = (
+            "Exact"
+            if master_match
             else None
         )
 
         # -------------------------------------------------
-        # Determine unit
+        # Unit
         # -------------------------------------------------
 
-        unit = get_attribute_unit(
-            field["dbf_type"],
-            field_name
+        unit = ""
+
+        if dbf_type in ("N", "F"):
+            unit = "Numbers"
+
+        elif dbf_type == "C":
+            unit = "Text"
+
+        elif dbf_type == "D":
+            unit = "Date"
+
+        elif dbf_type == "L":
+            unit = "Boolean"
+
+        # -------------------------------------------------
+        # Result
+        # -------------------------------------------------
+
+        result.append(
+            {
+                "name": name,
+
+                "value": "",
+
+                "source": "From Shape File",
+
+                "remarks": "",
+
+                # Shapefile attributes are not
+                # edited in the main metadata section.
+                "editable": False,
+
+                "type": "attribute",
+
+                "dbf_type": dbf_type,
+
+                "definition": definition,
+
+                "definition_source": (
+                    definition_source
+                ),
+
+                "unit": unit,
+
+                "master_match": master_match,
+
+                "match_type": match_type,
+
+                "range_min": "",
+
+                "range_max": "",
+
+                "dbf_size": size,
+
+                "dbf_decimal": decimal,
+            }
         )
 
-        # -------------------------------------------------
-        # Build combined metadata
-        # -------------------------------------------------
+    return result, len(records)
 
-        combined_field = {
 
-            "name": field_name,
+# =========================================================
+# Build complete metadata
+# =========================================================
 
-            "dbf_type": field["dbf_type"],
+def build_metadata(
+    dbf_path: str,
+    master_path: str,
+) -> Dict[str, Any]:
+    """
+    Build complete metadata.
 
-            "size": field["size"],
+    Returns:
 
-            "decimal": field["decimal"],
+        main_fields
+        fields
+        total_fields
+        total_records
+    """
 
-            "record_count": field["record_count"],
+    print(
+        "Reading main metadata template..."
+    )
 
-            "min": field["min"],
+    main_fields = read_main_template_fields(
+        master_path
+    )
 
-            "max": field["max"],
+    print(
+        f"Main template fields found: "
+        f"{len(main_fields)}"
+    )
 
-            "unit": unit,
+    print(
+        "Reading shapefile attributes..."
+    )
 
-            "definition": None,
-
-            "definition_source": None,
-
-            "master_match": False,
-
-            "match_type": match_type,
-
-            "master_field": master_field_name,
-
-        }
-
-        # -------------------------------------------------
-        # Apply Master metadata when a match exists
-        # -------------------------------------------------
-
-        if master_match:
-
-            combined_field["definition"] = (
-                master_match["definition"]
-            )
-
-            combined_field["definition_source"] = (
-                master_match["definition_source"]
-            )
-
-            combined_field["master_match"] = True
-
-        combined_fields.append(
-            combined_field
+    attributes, total_records = (
+        read_shapefile_attributes(
+            dbf_path,
+            master_path
         )
+    )
+
+    print(
+        f"Shapefile attributes found: "
+        f"{len(attributes)}"
+    )
+
+    print(
+        f"Shapefile records: "
+        f"{total_records}"
+    )
 
     return {
+        "main_fields": main_fields,
 
-        "total_fields": dbf_data["total_fields"],
+        "fields": attributes,
 
-        "total_records": dbf_data["total_records"],
+        "total_fields": len(attributes),
 
-        "fields": combined_fields,
-
+        "total_records": total_records,
     }

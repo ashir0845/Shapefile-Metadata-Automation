@@ -1,402 +1,764 @@
 import os
-from copy import copy
+import tempfile
+from typing import Any, Dict, List, Optional, Tuple
 
 import openpyxl
 from openpyxl.cell.cell import MergedCell
 
-from backend.services.metadata_builder import build_metadata
 
-
-# ---------------------------------------------------------
+# =========================================================
 # Paths
-# ---------------------------------------------------------
+# =========================================================
 
-DBF_PATH = r"data/BLOCK_2024/BLOCK__INDIA_2024.dbf"
-MASTER_PATH = r"data/Metadata Template(1).xlsx"
-
-TEMPLATE_PATH = r"data/Metadata Template(1).xlsx"
-OUTPUT_PATH = r"output/Generated_Metadata.xlsx"
-
-SHEET_NAME = "Meatadata_State_2001"
-
-
-# ---------------------------------------------------------
-# Attribute layout
-# ---------------------------------------------------------
-
-ATTRIBUTE_START_ROW = 40
-ATTRIBUTE_BLOCK_SIZE = 7
-
-# Row 61 is a merged row in the original template.
-ATTRIBUTE_4_START_ROW = 62
-
-
-# ---------------------------------------------------------
-# Copy formatting from one row to another
-# ---------------------------------------------------------
-
-def copy_row_format(ws, source_row, target_row):
-
-    if source_row in ws.row_dimensions:
-        ws.row_dimensions[target_row].height = (
-            ws.row_dimensions[source_row].height
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.dirname(
+            os.path.abspath(__file__)
         )
+    )
+)
 
-    for column in range(1, 4):
-
-        source_cell = ws.cell(source_row, column)
-        target_cell = ws.cell(target_row, column)
-
-        # Never try to modify a merged cell
-        if isinstance(target_cell, MergedCell):
-            continue
-
-        if source_cell.has_style:
-            target_cell._style = copy(source_cell._style)
-
-        target_cell.number_format = source_cell.number_format
-        target_cell.alignment = copy(source_cell.alignment)
-        target_cell.protection = copy(source_cell.protection)
-        target_cell.fill = copy(source_cell.fill)
-        target_cell.border = copy(source_cell.border)
-        target_cell.font = copy(source_cell.font)
+TEMPLATE_PATHS = [
+    os.path.join(
+        BASE_DIR,
+        "backend",
+        "templates",
+        "Metadata Template(1).xlsx",
+    ),
+    os.path.join(
+        BASE_DIR,
+        "data",
+        "Metadata Template(1).xlsx",
+    ),
+]
 
 
-# ---------------------------------------------------------
-# Copy complete attribute block formatting
-# ---------------------------------------------------------
+# =========================================================
+# Find template
+# =========================================================
 
-def copy_attribute_block(ws, source_start_row, target_start_row):
+def find_template() -> str:
+    """
+    Find the metadata Excel template.
+    """
 
-    for offset in range(ATTRIBUTE_BLOCK_SIZE):
+    for path in TEMPLATE_PATHS:
 
-        source_row = source_start_row + offset
-        target_row = target_start_row + offset
+        if os.path.exists(path):
 
-        copy_row_format(
-            ws,
-            source_row,
-            target_row
-        )
+            print(
+                f"Excel template found: {path}"
+            )
+
+            return path
+
+    raise FileNotFoundError(
+        "Metadata Excel template not found. "
+        "Expected one of:\n"
+        + "\n".join(TEMPLATE_PATHS)
+    )
 
 
-# ---------------------------------------------------------
-# Write metadata into one attribute block
-# ---------------------------------------------------------
+# =========================================================
+# Safe string
+# =========================================================
 
-def write_attribute_block(
+def safe_string(value: Any) -> str:
+    """
+    Convert a value safely to string.
+    """
+
+    if value is None:
+        return ""
+
+    return str(value)
+
+
+# =========================================================
+# Normalize text
+# =========================================================
+
+def normalize_text(value: Any) -> str:
+    """
+    Normalize field names for comparison.
+    """
+
+    return (
+        safe_string(value)
+        .strip()
+        .lower()
+        .replace("_", " ")
+        .replace("-", " ")
+    )
+
+
+# =========================================================
+# Merged-cell helper
+# =========================================================
+
+def get_writable_cell(
     ws,
-    start_row,
-    index,
-    metadata
+    row: int,
+    column: int,
 ):
+    """
+    Return a writable cell.
 
-    label_row = start_row + 1
-    definition_row = start_row + 2
-    definition_source_row = start_row + 3
-    min_row = start_row + 4
-    max_row = start_row + 5
-    unit_row = start_row + 6
+    If the requested cell belongs to a merged
+    range, return the top-left cell of that
+    merged range.
 
-    # --------------------------------
-    # Attribute number
-    # --------------------------------
+    This prevents:
 
-    ws.cell(start_row, 1).value = (
-        f"Attribute #{index}"
+        AttributeError:
+        'MergedCell' object attribute 'value'
+        is read-only
+    """
+
+    cell = ws.cell(
+        row=row,
+        column=column,
     )
 
-    # --------------------------------
-    # Attribute Label
-    # --------------------------------
+    # -----------------------------------------------------
+    # Normal cell
+    # -----------------------------------------------------
 
-    ws.cell(label_row, 1).value = "Attribute Label"
+    if not isinstance(cell, MergedCell):
 
-    ws.cell(label_row, 2).value = (
-        metadata.get("name", "")
-    )
+        return cell
 
-    ws.cell(label_row, 3).value = "From Shape File"
+    # -----------------------------------------------------
+    # Merged cell
+    # -----------------------------------------------------
 
-    # --------------------------------
-    # Attribute Definition
-    # --------------------------------
+    for merged_range in ws.merged_cells.ranges:
 
-    ws.cell(definition_row, 1).value = (
-        "Attribute Definition"
-    )
+        if cell.coordinate in merged_range:
 
-    ws.cell(definition_row, 2).value = (
-        metadata.get("definition") or ""
-    )
+            return ws.cell(
+                row=merged_range.min_row,
+                column=merged_range.min_col,
+            )
 
-    ws.cell(definition_row, 3).value = (
-        "From Master"
-        if metadata.get("definition")
-        else ""
-    )
-
-    # --------------------------------
-    # Attribute Definition Source
-    # --------------------------------
-
-    ws.cell(
-        definition_source_row,
-        1
-    ).value = "Attribute Definition Source"
-
-    ws.cell(
-        definition_source_row,
-        2
-    ).value = (
-        metadata.get("definition_source") or ""
-    )
-
-    ws.cell(
-        definition_source_row,
-        3
-    ).value = (
-        "From Master"
-        if metadata.get("definition_source")
-        else ""
-    )
-
-    # --------------------------------
-    # Minimum
-    # --------------------------------
-
-    ws.cell(
-        min_row,
-        1
-    ).value = "Range Domain Minimum"
-
-    minimum = metadata.get("min")
-
-    ws.cell(
-        min_row,
-        2
-    ).value = (
-        minimum
-        if minimum is not None
-        else ""
-    )
-
-    ws.cell(
-        min_row,
-        3
-    ).value = (
-        "From Shape File"
-        if minimum is not None
-        else ""
-    )
-
-    # --------------------------------
-    # Maximum
-    # --------------------------------
-
-    ws.cell(
-        max_row,
-        1
-    ).value = "Range Domain Maximum"
-
-    maximum = metadata.get("max")
-
-    ws.cell(
-        max_row,
-        2
-    ).value = (
-        maximum
-        if maximum is not None
-        else ""
-    )
-
-    ws.cell(
-        max_row,
-        3
-    ).value = (
-        "From Shape File"
-        if maximum is not None
-        else ""
-    )
-
-    # --------------------------------
-    # Unit
-    # --------------------------------
-
-    ws.cell(
-        unit_row,
-        1
-    ).value = "Attribute Unit of Measurement"
-
-    unit = metadata.get("unit")
-
-    ws.cell(
-        unit_row,
-        2
-    ).value = (
-        unit
-        if unit is not None
-        else ""
-    )
-
-    ws.cell(
-        unit_row,
-        3
-    ).value = (
-        "From Shape File"
-        if unit
-        else ""
-    )
+    return cell
 
 
-# ---------------------------------------------------------
-# Generate Excel
-# ---------------------------------------------------------
+# =========================================================
+# Safe set value
+# =========================================================
 
-# ---------------------------------------------------------
-# Generate Excel
-# ---------------------------------------------------------
-
-def generate_excel(
-    dbf_path=DBF_PATH,
-    master_path=MASTER_PATH
+def set_cell_value(
+    ws,
+    row: int,
+    column: int,
+    value: Any,
 ):
+    """
+    Safely write a value to an Excel cell.
 
-    print("Loading Excel template...")
+    Handles merged cells automatically.
+    """
 
-    workbook = openpyxl.load_workbook(
-        TEMPLATE_PATH,
-        data_only=False
+    cell = get_writable_cell(
+        ws,
+        row,
+        column,
     )
 
-    ws = workbook[SHEET_NAME]
+    cell.value = value
 
-    print("Template loaded successfully!")
+    return cell
 
-    # --------------------------------
-    # Build metadata
-    # --------------------------------
 
-    print("Building metadata...")
+# =========================================================
+# Find field rows
+# =========================================================
 
-    metadata = build_metadata(
-        dbf_path,
-        master_path
-    )
+def find_field_rows(
+    ws,
+) -> Dict[str, int]:
+    """
+    Find metadata field names in column A.
 
-    metadata_list = metadata["fields"]
+    Returns:
 
-    print(
-        f"Metadata fields received: "
-        f"{len(metadata_list)}"
-    )
+        {
+            "Originator": 2,
+            "Publication Date": 3,
+            ...
+        }
 
-    print(
-        f"Total records: "
-        f"{metadata['total_records']}"
-    )
+    The comparison is normalized so small differences
+    such as underscores / hyphens do not break matching.
+    """
 
-    # --------------------------------
-    # Clear existing sample attributes
-    # --------------------------------
+    result: Dict[str, int] = {}
 
-    for row in range(40, 61):
-
-        for column in range(1, 4):
-
-            cell = ws.cell(row, column)
-
-            # MergedCell is read-only
-            if isinstance(cell, MergedCell):
-                continue
-
-            cell.value = None
-
-    # --------------------------------
-    # Generate attributes
-    # --------------------------------
-
-    for index, field_metadata in enumerate(
-        metadata_list,
-        start=1
+    for row in range(
+        1,
+        ws.max_row + 1,
     ):
 
-        # --------------------------------
-        # Existing blocks
-        # --------------------------------
+        value = ws.cell(
+            row=row,
+            column=1,
+        ).value
 
-        if index <= 3:
+        if value is None:
+            continue
 
-            start_row = (
-                ATTRIBUTE_START_ROW
-                + (index - 1)
-                * ATTRIBUTE_BLOCK_SIZE
+        key = normalize_text(value)
+
+        if not key:
+            continue
+
+        result[key] = row
+
+    return result
+
+
+# =========================================================
+# Find metadata sheet
+# =========================================================
+
+def find_metadata_sheet(
+    workbook,
+):
+    """
+    Find the actual metadata sheet.
+    """
+
+    preferred_names = [
+        "Meatadata_State_2001",
+        "Metadata_State_2001",
+        "Metadata",
+    ]
+
+    for name in preferred_names:
+
+        if name in workbook.sheetnames:
+
+            print(
+                f"Using metadata sheet: {name}"
             )
 
-        # --------------------------------
-        # New blocks
-        # --------------------------------
+            return workbook[name]
 
-        else:
-
-            start_row = (
-                ATTRIBUTE_4_START_ROW
-                + (index - 4)
-                * ATTRIBUTE_BLOCK_SIZE
-            )
-
-            # Copy formatting from Attribute #3
-            copy_attribute_block(
-                ws,
-                54,
-                start_row
-            )
-
-        # --------------------------------
-        # Write metadata
-        # --------------------------------
-
-        write_attribute_block(
-            ws,
-            start_row,
-            index,
-            field_metadata
-        )
-
-    # --------------------------------
-    # Create output directory
-    # --------------------------------
-
-    os.makedirs(
-        os.path.dirname(OUTPUT_PATH),
-        exist_ok=True
-    )
-
-    # --------------------------------
-    # Save workbook
-    # --------------------------------
-
-    workbook.save(
-        OUTPUT_PATH
-    )
-
-    print()
-    print("================================")
-    print("Excel generated successfully!")
-    print("================================")
+    # -----------------------------------------------------
+    # Fallback
+    # -----------------------------------------------------
 
     print(
-        f"Total attributes: "
-        f"{len(metadata_list)}"
+        f"Using first sheet: "
+        f"{workbook.sheetnames[0]}"
+    )
+
+    return workbook[
+        workbook.sheetnames[0]
+    ]
+
+
+# =========================================================
+# Find attribute section
+# =========================================================
+
+def find_attribute_start_row(
+    ws,
+) -> Optional[int]:
+    """
+    Find Attribute #1 in column A.
+    """
+
+    for row in range(
+        1,
+        ws.max_row + 1,
+    ):
+
+        value = ws.cell(
+            row=row,
+            column=1,
+        ).value
+
+        if value is None:
+            continue
+
+        text = normalize_text(value)
+
+        if text.startswith(
+            "attribute #1"
+        ):
+
+            return row
+
+    return None
+
+
+# =========================================================
+# Write main metadata fields
+# =========================================================
+
+def write_main_fields(
+    ws,
+    main_fields: List[Dict[str, Any]],
+):
+    """
+    Write main metadata fields into the
+    existing Excel template.
+
+    IMPORTANT:
+    We search for the field name already
+    present in the template instead of
+    blindly writing by row number.
+
+    This preserves the template structure.
+    """
+
+    field_rows = find_field_rows(ws)
+
+    print(
+        "--------------------------------"
+    )
+
+    print(
+        "Writing main metadata fields..."
+    )
+
+    written = 0
+    skipped = 0
+
+    for field in main_fields:
+
+        name = safe_string(
+            field.get("name")
+        )
+
+        value = field.get(
+            "value",
+            "",
+        )
+
+        if not name:
+            continue
+
+        key = normalize_text(name)
+
+        row = field_rows.get(key)
+
+        if row is None:
+
+            print(
+                f"Field not found in template: "
+                f"{name}"
+            )
+
+            skipped += 1
+
+            continue
+
+        # -------------------------------------------------
+        # Column B = Value
+        # -------------------------------------------------
+
+        try:
+
+            set_cell_value(
+                ws,
+                row,
+                2,
+                value,
+            )
+
+            written += 1
+
+        except Exception as error:
+
+            print(
+                f"Could not write field "
+                f"'{name}' at row {row}: "
+                f"{repr(error)}"
+            )
+
+            skipped += 1
+
+    print(
+        f"Main fields written: {written}"
+    )
+
+    print(
+        f"Main fields skipped: {skipped}"
+    )
+
+
+# =========================================================
+# Find attribute rows
+# =========================================================
+
+def find_attribute_rows(
+    ws,
+) -> Dict[str, int]:
+    """
+    Find Attribute # rows in the template.
+
+    Example:
+
+        Attribute #1
+        Attribute #2
+        Attribute #3
+
+    Returns:
+
+        {
+            "attribute #1": 40,
+            "attribute #2": 41,
+            ...
+        }
+    """
+
+    result: Dict[str, int] = {}
+
+    for row in range(
+        1,
+        ws.max_row + 1,
+    ):
+
+        value = ws.cell(
+            row=row,
+            column=1,
+        ).value
+
+        if value is None:
+            continue
+
+        text = normalize_text(value)
+
+        if text.startswith(
+            "attribute #"
+        ):
+
+            result[text] = row
+
+    return result
+
+
+# =========================================================
+# Write shapefile attributes
+# =========================================================
+
+def write_attributes(
+    ws,
+    fields: List[Dict[str, Any]],
+):
+    """
+    Write shapefile attributes into the
+    existing attribute section.
+
+    The function starts from Attribute #1
+    and fills the template sequentially.
+    """
+
+    attribute_start = find_attribute_start_row(
+        ws
+    )
+
+    if attribute_start is None:
+
+        print(
+            "Attribute #1 was not found "
+            "in the template."
+        )
+
+        return
+
+    print(
+        "Attribute section starts at Excel row "
+        f"{attribute_start}"
+    )
+
+    # -----------------------------------------------------
+    # Find columns from the attribute section
+    # -----------------------------------------------------
+
+    header_row = attribute_start
+
+    print(
+        f"Writing {len(fields)} "
+        "shapefile attributes..."
+    )
+
+    # -----------------------------------------------------
+    # Determine how many columns exist
+    # -----------------------------------------------------
+
+    max_column = ws.max_column
+
+    # -----------------------------------------------------
+    # Write attributes sequentially
+    #
+    # We preserve the existing template rows.
+    # -----------------------------------------------------
+
+    written = 0
+
+    for index, field in enumerate(fields):
+
+        target_row = (
+            attribute_start + index
+        )
+
+        name = safe_string(
+            field.get("name")
+        )
+
+        definition = safe_string(
+            field.get("definition")
+        )
+
+        definition_source = safe_string(
+            field.get(
+                "definition_source"
+            )
+        )
+
+        unit = safe_string(
+            field.get("unit")
+        )
+
+        match_type = safe_string(
+            field.get("match_type")
+        )
+
+        # -------------------------------------------------
+        # If template does not have enough rows,
+        # create rows.
+        # -------------------------------------------------
+
+        if target_row > ws.max_row:
+
+            ws.insert_rows(
+                ws.max_row + 1,
+                1,
+            )
+
+        # -------------------------------------------------
+        # Column mapping
+        #
+        # The exact template may differ, therefore
+        # we use the common structure:
+        #
+        # A = Attribute
+        # B = Value
+        # C = Source / Definition
+        # D = Definition Source
+        # E = Unit
+        # F = Match Type
+        #
+        # Existing template formatting is preserved
+        # as much as possible.
+        # -------------------------------------------------
+
+        values = [
+            name,
+            field.get("value", ""),
+            definition,
+            definition_source,
+            unit,
+            match_type,
+        ]
+
+        for column, value in enumerate(
+            values,
+            start=1,
+        ):
+
+            try:
+
+                cell = get_writable_cell(
+                    ws,
+                    target_row,
+                    column,
+                )
+
+                # -----------------------------------------
+                # Do not overwrite merged cells that
+                # belong to another row.
+                # -----------------------------------------
+
+                if isinstance(
+                    cell,
+                    MergedCell,
+                ):
+
+                    continue
+
+                cell.value = value
+
+            except Exception as error:
+
+                print(
+                    f"Attribute write error "
+                    f"row={target_row}, "
+                    f"column={column}, "
+                    f"field={name}: "
+                    f"{repr(error)}"
+                )
+
+        written += 1
+
+    print(
+        f"Attributes written: {written}"
+    )
+
+
+# =========================================================
+# Generate Excel
+# =========================================================
+
+def generate_excel(
+    metadata: Dict[str, Any],
+) -> str:
+    """
+    Generate the final metadata Excel file.
+
+    The original template is loaded and populated.
+    The template itself is never modified.
+    """
+
+    template_path = find_template()
+
+    # -----------------------------------------------------
+    # Load template
+    # -----------------------------------------------------
+
+    print(
+        "Loading Excel template..."
+    )
+
+    workbook = openpyxl.load_workbook(
+        template_path
+    )
+
+    print(
+        "Workbook sheets:",
+        workbook.sheetnames,
+    )
+
+    # -----------------------------------------------------
+    # Metadata sheet
+    # -----------------------------------------------------
+
+    ws = find_metadata_sheet(
+        workbook
+    )
+
+    # -----------------------------------------------------
+    # Get metadata
+    # -----------------------------------------------------
+
+    main_fields = metadata.get(
+        "main_fields",
+        [],
+    )
+
+    fields = metadata.get(
+        "fields",
+        [],
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        f"Main metadata fields: "
+        f"{len(main_fields)}"
+    )
+
+    print(
+        f"Shapefile attributes: "
+        f"{len(fields)}"
     )
 
     print(
         f"Total records: "
-        f"{metadata['total_records']}"
+        f"{metadata.get('total_records', 0)}"
     )
 
     print(
-        f"Output: {OUTPUT_PATH}"
+        "========================================"
     )
 
-    return OUTPUT_PATH
+    # -----------------------------------------------------
+    # Write main metadata
+    # -----------------------------------------------------
+
+    write_main_fields(
+        ws,
+        main_fields,
+    )
+
+    # -----------------------------------------------------
+    # Write shapefile attributes
+    # -----------------------------------------------------
+
+    write_attributes(
+        ws,
+        fields,
+    )
+
+    # -----------------------------------------------------
+    # Create output file
+    # -----------------------------------------------------
+
+    output_dir = os.path.join(
+        BASE_DIR,
+        "generated",
+    )
+
+    os.makedirs(
+        output_dir,
+        exist_ok=True,
+    )
+
+    fd, output_path = tempfile.mkstemp(
+        prefix="Generated_Metadata_",
+        suffix=".xlsx",
+        dir=output_dir,
+    )
+
+    os.close(fd)
+
+    # -----------------------------------------------------
+    # Save workbook
+    # -----------------------------------------------------
+
+    print(
+        f"Saving Excel file: "
+        f"{output_path}"
+    )
+
+    workbook.save(
+        output_path
+    )
+
+    # -----------------------------------------------------
+    # Verify
+    # -----------------------------------------------------
+
+    if not os.path.exists(
+        output_path
+    ):
+
+        raise FileNotFoundError(
+            "Excel file was not created."
+        )
+
+    print(
+        "Excel generated successfully."
+    )
+
+    print(
+        f"Output: {output_path}"
+    )
+
+    return output_path
