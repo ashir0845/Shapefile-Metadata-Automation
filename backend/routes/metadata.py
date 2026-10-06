@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     HTTPException,
     UploadFile,
@@ -23,6 +24,10 @@ from backend.services.metadata_service import (
     build_metadata,
 )
 from openpyxl.styles import PatternFill
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend.models.history import GeneratedFileHistory
 
 # =========================================================
 # ROUTER
@@ -179,6 +184,46 @@ def normalize_text(
         .replace("-", " ")
         .replace("/", " ")
     )
+
+
+# =========================================================
+# HISTORY FIELD HELPERS
+# =========================================================
+
+def get_main_field_value(
+    main_fields: List[Dict[str, Any]],
+    field_name: str,
+) -> str:
+    """
+    Return the exact value of a main metadata field.
+
+    This is intentionally used for History so values such as:
+
+        Entity Label     -> State
+        Publication Date -> 31st March 2025 (Current Date)
+
+    are stored exactly as they appear in the reviewed metadata.
+    """
+
+    target = normalize_text(field_name)
+
+    if not target:
+        return ""
+
+    for field in main_fields:
+        current_name = normalize_text(
+            field.get("name", "")
+        )
+
+        if current_name == target:
+            value = field.get("value", "")
+
+            if value is None:
+                return ""
+
+            return str(value).strip()
+
+    return ""
 
 
 # =========================================================
@@ -1857,6 +1902,7 @@ async def upload_shapefile(
 @router.post("/generate-excel")
 async def generate_metadata_excel(
     metadata: Dict[str, Any],
+    db: Session = Depends(get_db),
 ):
 
     if not os.path.exists(
@@ -2016,6 +2062,86 @@ async def generate_metadata_excel(
       
         workbook.save(
             output_path
+        )
+
+        # =================================================
+        # SAVE GENERATION HISTORY TO POSTGRESQL
+        # =================================================
+        #
+        # Entity:
+        #   Entity Label -> e.g. "State"
+        #
+        # Year column in History:
+        #   Publication Date -> e.g.
+        #   "31st March 2025 (Current Date)"
+        #
+        # The complete publication-date text is preserved.
+        # We do NOT extract only the numeric year.
+        # =================================================
+
+        entity = get_main_field_value(
+            main_fields,
+            "Entity Label",
+        )
+
+        publication_date = get_main_field_value(
+            main_fields,
+            "Publication Date",
+        )
+
+        history_record = GeneratedFileHistory(
+            filename=output_filename,
+            original_filename=metadata.get("filename"),
+            entity=entity or None,
+            publication_date=publication_date or None,
+            records_count=int(
+                metadata.get("total_records", 0) or 0
+            ),
+            attributes_count=len(attributes),
+            status="success",
+            generated_file_path=output_path,
+        )
+
+        try:
+            db.add(history_record)
+            db.commit()
+            db.refresh(history_record)
+
+        except Exception:
+            db.rollback()
+
+            # Do not leave an Excel file without its history record.
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+
+            raise
+
+        print(
+            "========================================"
+        )
+
+        print(
+            "History saved to PostgreSQL."
+        )
+
+        print(
+            f"History ID: {history_record.id}"
+        )
+
+        print(
+            f"Entity: {history_record.entity}"
+        )
+
+        print(
+            f"Publication Date: "
+            f"{history_record.publication_date}"
+        )
+
+        print(
+            "========================================"
         )
 
         print(

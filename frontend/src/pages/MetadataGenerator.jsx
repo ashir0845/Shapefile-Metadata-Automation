@@ -149,7 +149,7 @@ function MetadataGenerator() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#f4f8fc]">
+    <div className="flex min-h-screen bg-[#f4f8fc] p-0">
       {/* ======================================================
           MAIN
       ====================================================== */}
