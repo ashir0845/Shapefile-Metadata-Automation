@@ -9,13 +9,142 @@ import RecentActivity from "../components/RecentActivity";
 import { generateExcel } from "../services/api";
 
 /* ============================================================
+   LOCAL STORAGE KEY
+============================================================ */
+
+const METADATA_GENERATOR_STORAGE_KEY = "gis_metadata_generator_state";
+
+/* ============================================================
+   RESTORE SAVED STATE
+============================================================ */
+
+function getSavedState() {
+  try {
+    const savedState = localStorage.getItem(METADATA_GENERATOR_STORAGE_KEY);
+
+    if (!savedState) {
+      return {
+        currentStep: 1,
+        metadata: null,
+      };
+    }
+
+    const parsedState = JSON.parse(savedState);
+
+    return {
+      currentStep:
+        Number.isInteger(parsedState?.currentStep) &&
+        parsedState.currentStep >= 1 &&
+        parsedState.currentStep <= 4
+          ? parsedState.currentStep
+          : 1,
+
+      metadata: parsedState?.metadata || null,
+    };
+  } catch (error) {
+    console.error("Unable to restore metadata generator state:", error);
+
+    return {
+      currentStep: 1,
+      metadata: null,
+    };
+  }
+}
+
+/* ============================================================
    MAIN
 ============================================================ */
 
 function MetadataGenerator() {
-  const [currentStep, setCurrentStep] = useState(1);
+  /* ==========================================================
+     INITIAL STATE
 
-  const [metadata, setMetadata] = useState(null);
+     Restore the previously saved workflow when the page
+     is opened again.
+
+     This is important when the user:
+     - switches to History
+     - switches back to Home
+     - refreshes the browser
+  ========================================================== */
+
+  const [savedState] = useState(() => getSavedState());
+
+  const [currentStep, setCurrentStep] = useState(savedState.currentStep);
+
+  const [metadata, setMetadata] = useState(savedState.metadata);
+
+  /* ==========================================================
+     RESET AFTER SUCCESSFUL EXCEL DOWNLOAD
+
+     IMPORTANT:
+     This is the ONLY place where the workflow is
+     intentionally cleared.
+
+     Clicking Home does NOT call this function.
+  ========================================================== */
+
+  const resetAfterDownload = () => {
+    /* --------------------------------------------------------
+       Reset React state.
+    -------------------------------------------------------- */
+
+    setCurrentStep(1);
+    setMetadata(null);
+
+    /* --------------------------------------------------------
+       Clear saved workflow.
+    -------------------------------------------------------- */
+
+    try {
+      localStorage.removeItem(METADATA_GENERATOR_STORAGE_KEY);
+    } catch (error) {
+      console.error("Unable to clear metadata generator state:", error);
+    }
+  };
+
+  /* ==========================================================
+     SAVE CURRENT WORKFLOW
+
+     Saves:
+     - current step
+     - uploaded metadata
+     - edited metadata
+     - shapefile attributes
+     - match information
+
+     This allows the workflow to survive navigation between
+     Home and History.
+  ========================================================== */
+
+  useEffect(() => {
+    try {
+      /* ------------------------------------------------------
+         If the application is completely reset, there is
+         nothing to save.
+      ------------------------------------------------------ */
+
+      if (currentStep === 1 && metadata === null) {
+        localStorage.removeItem(METADATA_GENERATOR_STORAGE_KEY);
+
+        return;
+      }
+
+      /* ------------------------------------------------------
+         Save the current workflow.
+      ------------------------------------------------------ */
+
+      localStorage.setItem(
+        METADATA_GENERATOR_STORAGE_KEY,
+        JSON.stringify({
+          currentStep,
+          metadata,
+        }),
+      );
+    } catch (error) {
+      console.error("Unable to save metadata generator state:", error);
+    }
+  }, [currentStep, metadata]);
 
   /* ==========================================================
      UPLOAD SUCCESS
@@ -24,25 +153,22 @@ function MetadataGenerator() {
   const handleUploadSuccess = (result) => {
     console.log("Metadata received:", result);
 
-    /*
-     * Preserve all metadata received from backend.
-     *
-     * Especially important:
-     * - main_fields
-     * - fields
-     * - remarks
-     *
-     * We explicitly preserve remarks so that the review page
-     * can display them before Excel generation.
-     */
+    /* --------------------------------------------------------
+       NORMALIZE SHAPEFILE FIELDS
+
+       Empty remarks are treated as:
+       "From Shape File"
+    -------------------------------------------------------- */
 
     const normalizedFields = (result?.fields || []).map((field) => ({
       ...field,
 
       remarks:
-        field?.remarks !== undefined && field?.remarks !== null
+        field?.remarks !== undefined &&
+        field?.remarks !== null &&
+        String(field.remarks).trim() !== ""
           ? String(field.remarks)
-          : "",
+          : "From Shape File",
 
       definition:
         field?.definition !== undefined && field?.definition !== null
@@ -58,6 +184,10 @@ function MetadataGenerator() {
       unit: field?.unit !== undefined && field?.unit !== null ? field.unit : "",
     }));
 
+    /* --------------------------------------------------------
+       NORMALIZE MAIN FIELDS
+    -------------------------------------------------------- */
+
     const normalizedMainFields = (result?.main_fields || []).map((field) => ({
       ...field,
 
@@ -70,6 +200,10 @@ function MetadataGenerator() {
           : "",
     }));
 
+    /* --------------------------------------------------------
+       SAVE METADATA
+    -------------------------------------------------------- */
+
     setMetadata({
       ...result,
 
@@ -77,6 +211,10 @@ function MetadataGenerator() {
 
       fields: normalizedFields,
     });
+
+    /* --------------------------------------------------------
+       MOVE TO STEP 2
+    -------------------------------------------------------- */
 
     setCurrentStep(2);
   };
@@ -90,14 +228,15 @@ function MetadataGenerator() {
 
     console.log("Updated shapefile fields:", fields);
 
-    /*
-     * IMPORTANT
-     *
-     * Preserve remarks while moving from Step 2 to Step 3.
-     */
+    /* --------------------------------------------------------
+       NORMALIZE MAIN FIELDS
+    -------------------------------------------------------- */
 
     const normalizedMainFields = (mainFields || []).map((field) => ({
       ...field,
+
+      value:
+        field?.value !== undefined && field?.value !== null ? field.value : "",
 
       remarks:
         field?.remarks !== undefined && field?.remarks !== null
@@ -105,13 +244,19 @@ function MetadataGenerator() {
           : "",
     }));
 
+    /* --------------------------------------------------------
+       NORMALIZE SHAPEFILE FIELDS
+    -------------------------------------------------------- */
+
     const normalizedFields = (fields || []).map((field) => ({
       ...field,
 
       remarks:
-        field?.remarks !== undefined && field?.remarks !== null
+        field?.remarks !== undefined &&
+        field?.remarks !== null &&
+        String(field.remarks).trim() !== ""
           ? String(field.remarks)
-          : "",
+          : "From Shape File",
 
       definition:
         field?.definition !== undefined && field?.definition !== null
@@ -129,6 +274,10 @@ function MetadataGenerator() {
 
     console.log("Normalized attributes:", normalizedFields);
 
+    /* --------------------------------------------------------
+       UPDATE METADATA
+    -------------------------------------------------------- */
+
     setMetadata((previous) => ({
       ...previous,
 
@@ -136,6 +285,10 @@ function MetadataGenerator() {
 
       fields: normalizedFields,
     }));
+
+    /* --------------------------------------------------------
+       MOVE TO STEP 3
+    -------------------------------------------------------- */
 
     setCurrentStep(3);
   };
@@ -150,10 +303,6 @@ function MetadataGenerator() {
 
   return (
     <div className="flex min-h-screen bg-[#f4f8fc] p-0">
-      {/* ======================================================
-          MAIN
-      ====================================================== */}
-
       <div className="min-w-0 flex-1">
         <main className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-7">
           {/* ==================================================
@@ -207,7 +356,11 @@ function MetadataGenerator() {
           ================================================== */}
 
           {currentStep === 4 && metadata && (
-            <StepFour metadata={metadata} onBack={() => setCurrentStep(3)} />
+            <StepFour
+              metadata={metadata}
+              onBack={() => setCurrentStep(3)}
+              onDownloadSuccess={resetAfterDownload}
+            />
           )}
         </main>
       </div>
@@ -380,7 +533,7 @@ function StepThree({ metadata, onBack, onContinue }) {
    STEP 4
 ============================================================ */
 
-function StepFour({ metadata, onBack }) {
+function StepFour({ metadata, onBack, onDownloadSuccess }) {
   const [loading, setLoading] = useState(false);
 
   const [error, setError] = useState("");
@@ -394,20 +547,7 @@ function StepFour({ metadata, onBack }) {
   const handleDownload = async () => {
     try {
       setLoading(true);
-
       setError("");
-
-      /*
-       * IMPORTANT
-       *
-       * Create a clean export object.
-       *
-       * Remarks are intentionally preserved here so the complete
-       * metadata object is available to the backend if required.
-       *
-       * The backend/export logic should decide which columns are
-       * written to Excel.
-       */
 
       const exportMetadata = {
         ...metadata,
@@ -425,9 +565,11 @@ function StepFour({ metadata, onBack }) {
           ...field,
 
           remarks:
-            field?.remarks !== undefined && field?.remarks !== null
+            field?.remarks !== undefined &&
+            field?.remarks !== null &&
+            String(field.remarks).trim() !== ""
               ? String(field.remarks)
-              : "",
+              : "From Shape File",
 
           definition:
             field?.definition !== undefined && field?.definition !== null
@@ -455,9 +597,24 @@ function StepFour({ metadata, onBack }) {
         })),
       );
 
+      /* ------------------------------------------------------
+         GENERATE EXCEL
+
+         The workflow is reset ONLY after this
+         operation succeeds.
+      ------------------------------------------------------ */
+
       await generateExcel(exportMetadata);
 
       console.log("Excel generated successfully");
+
+      /* ------------------------------------------------------
+         RESET AFTER SUCCESS
+      ------------------------------------------------------ */
+
+      if (typeof onDownloadSuccess === "function") {
+        onDownloadSuccess();
+      }
     } catch (err) {
       console.error("Excel download error:", err);
 
@@ -479,17 +636,13 @@ function StepFour({ metadata, onBack }) {
 
   return (
     <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-      {/* ======================================================
-          SUCCESS ICON
-      ====================================================== */}
+      {/* SUCCESS ICON */}
 
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-3xl text-emerald-600">
         ✓
       </div>
 
-      {/* ======================================================
-          TITLE
-      ====================================================== */}
+      {/* TITLE */}
 
       <h2 className="mt-4 text-2xl font-bold text-[#102b55]">Metadata Ready</h2>
 
@@ -497,9 +650,7 @@ function StepFour({ metadata, onBack }) {
         Your GIS metadata has been prepared successfully.
       </p>
 
-      {/* ======================================================
-          FILE INFORMATION
-      ====================================================== */}
+      {/* FILE INFORMATION */}
 
       {metadata && (
         <div className="mx-auto mt-6 max-w-md rounded-xl border border-slate-200 bg-slate-50 p-4 text-left">
@@ -539,9 +690,7 @@ function StepFour({ metadata, onBack }) {
         </div>
       )}
 
-      {/* ======================================================
-          ERROR
-      ====================================================== */}
+      {/* ERROR */}
 
       {error && (
         <div className="mx-auto mt-4 max-w-md rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -549,9 +698,7 @@ function StepFour({ metadata, onBack }) {
         </div>
       )}
 
-      {/* ======================================================
-          DOWNLOAD BUTTON
-      ====================================================== */}
+      {/* DOWNLOAD BUTTON */}
 
       <button
         type="button"
@@ -566,9 +713,7 @@ function StepFour({ metadata, onBack }) {
         {loading ? "Generating Excel..." : "↓ Download Excel"}
       </button>
 
-      {/* ======================================================
-          BACK BUTTON
-      ====================================================== */}
+      {/* BACK BUTTON */}
 
       <div className="mt-5">
         <button
@@ -581,9 +726,7 @@ function StepFour({ metadata, onBack }) {
         </button>
       </div>
 
-      {/* ======================================================
-          DOWNLOAD CONFIRMATION POPUP
-      ====================================================== */}
+      {/* DOWNLOAD CONFIRMATION POPUP */}
 
       {showDownloadConfirm && (
         <div
@@ -651,6 +794,92 @@ function GenerateButton({ disabled = false }) {
 }
 
 /* ============================================================
+   CHECK WHETHER REMARKS COME FROM SHAPE FILE
+============================================================ */
+
+function isFromShapeFile(field) {
+  const remarks = String(field?.remarks ?? field?.remark ?? "")
+    .trim()
+    .toLowerCase();
+
+  return remarks.includes("from shape file");
+}
+
+/* ============================================================
+   CHECK WHETHER VALUE EXISTS
+============================================================ */
+
+function hasValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  return String(value).trim() !== "";
+}
+
+/* ============================================================
+   MAIN METADATA MATCH STATUS
+============================================================ */
+
+function getMainMatchStatus(field) {
+  if (!isFromShapeFile(field)) {
+    return null;
+  }
+
+  return hasValue(field?.value) ? "Match" : "No Match";
+}
+
+/* ============================================================
+   MAIN METADATA MATCH BADGE
+============================================================ */
+
+function MatchBadge({ field }) {
+  const matchStatus = getMainMatchStatus(field);
+
+  if (!matchStatus) {
+    return <span className="text-sm text-slate-300">—</span>;
+  }
+
+  if (matchStatus === "Match") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        Match
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
+      No Match
+    </span>
+  );
+}
+
+/* ============================================================
+   SHAPE ATTRIBUTE MATCH BADGE
+============================================================ */
+
+function ShapeAttributeMatchBadge({ field }) {
+  if (!isFromShapeFile(field)) {
+    return <span className="text-sm text-slate-300">—</span>;
+  }
+
+  if (field?.master_match) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        Yes
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
+      No
+    </span>
+  );
+}
+
+/* ============================================================
    REVIEW & EDIT
 ============================================================ */
 
@@ -708,13 +937,11 @@ function MetadataReview({ metadata, onBack, onContinue }) {
   ========================================================== */
 
   const handleContinue = () => {
-    /*
-     * Before sending the data to the parent,
-     * make sure remarks are preserved.
-     */
-
     const normalizedMainFields = mainFields.map((field) => ({
       ...field,
+
+      value:
+        field?.value !== undefined && field?.value !== null ? field.value : "",
 
       remarks:
         field?.remarks !== undefined && field?.remarks !== null
@@ -726,9 +953,11 @@ function MetadataReview({ metadata, onBack, onContinue }) {
       ...field,
 
       remarks:
-        field?.remarks !== undefined && field?.remarks !== null
+        field?.remarks !== undefined &&
+        field?.remarks !== null &&
+        String(field.remarks).trim() !== ""
           ? String(field.remarks)
-          : "",
+          : "From Shape File",
 
       definition:
         field?.definition !== undefined && field?.definition !== null
@@ -753,6 +982,8 @@ function MetadataReview({ metadata, onBack, onContinue }) {
       normalizedFields.map((field) => ({
         name: field.name,
         remarks: field.remarks,
+        master_match: field.master_match,
+        match_type: field.match_type,
       })),
     );
 
@@ -838,7 +1069,7 @@ function MetadataReview({ metadata, onBack, onContinue }) {
         </div>
 
         <div className="max-h-[600px] overflow-auto">
-          <table className="w-full min-w-[950px]">
+          <table className="w-full min-w-[1050px]">
             <thead className="sticky top-0 z-10 bg-white shadow-sm">
               <tr>
                 <TableHead>#</TableHead>
@@ -846,6 +1077,8 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                 <TableHead>Field</TableHead>
 
                 <TableHead>Value</TableHead>
+
+                <TableHead>Match</TableHead>
 
                 <TableHead>Source</TableHead>
 
@@ -857,7 +1090,7 @@ function MetadataReview({ metadata, onBack, onContinue }) {
               {mainFields.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-5 py-10 text-center text-sm text-slate-500"
                   >
                     No template metadata fields were returned by the backend.
@@ -869,15 +1102,21 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                     key={`${field.name}-${index}`}
                     className="border-b border-slate-100 hover:bg-slate-50"
                   >
+                    {/* # */}
+
                     <td className="px-4 py-3 text-sm text-slate-400">
                       {index + 1}
                     </td>
+
+                    {/* FIELD */}
 
                     <td className="px-4 py-3">
                       <p className="font-semibold text-slate-800">
                         {field.name}
                       </p>
                     </td>
+
+                    {/* VALUE */}
 
                     <td className="px-4 py-3">
                       {field.editable ? (
@@ -896,9 +1135,19 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                       )}
                     </td>
 
+                    {/* MATCH */}
+
+                    <td className="px-4 py-3">
+                      <MatchBadge field={field} />
+                    </td>
+
+                    {/* SOURCE */}
+
                     <td className="px-4 py-3 text-sm text-slate-600">
                       {field.source || "Template"}
                     </td>
+
+                    {/* REMARKS */}
 
                     <td className="px-4 py-3">
                       {field.editable ? (
@@ -920,8 +1169,8 @@ function MetadataReview({ metadata, onBack, onContinue }) {
       </div>
 
       {/* ======================================================
-    SHAPEFILE ATTRIBUTES
-====================================================== */}
+          SHAPEFILE ATTRIBUTES
+      ====================================================== */}
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -967,11 +1216,13 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                   className="border-b border-slate-100 hover:bg-slate-50"
                 >
                   {/* # */}
+
                   <td className="px-4 py-3 text-sm text-slate-400">
                     {index + 1}
                   </td>
 
                   {/* FIELD NAME */}
+
                   <td className="px-4 py-3">
                     <p className="font-semibold text-slate-800">{field.name}</p>
 
@@ -981,6 +1232,7 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                   </td>
 
                   {/* TYPE */}
+
                   <td className="px-4 py-3">
                     <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
                       {field.dbf_type || "—"}
@@ -988,6 +1240,7 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                   </td>
 
                   {/* DEFINITION */}
+
                   <td className="px-4 py-3">
                     {field.editable ? (
                       <input
@@ -1006,11 +1259,13 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                   </td>
 
                   {/* SOURCE */}
+
                   <td className="px-4 py-3 text-sm text-slate-600">
                     {field.definition_source || "—"}
                   </td>
 
                   {/* UNIT */}
+
                   <td className="px-4 py-3">
                     {field.editable ? (
                       <select
@@ -1021,10 +1276,15 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="">Select</option>
+
                         <option value="Numbers">Numbers</option>
+
                         <option value="Text">Text</option>
+
                         <option value="Percentage">Percentage</option>
+
                         <option value="Meters">Meters</option>
+
                         <option value="Kilometers">Kilometers</option>
                       </select>
                     ) : (
@@ -1035,24 +1295,16 @@ function MetadataReview({ metadata, onBack, onContinue }) {
                   </td>
 
                   {/* MATCH */}
+
                   <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        field.master_match
-                          ? field.match_type === "Exact"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-blue-50 text-blue-700"
-                          : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {field.master_match ? field.match_type : "No Match"}
-                    </span>
+                    <ShapeAttributeMatchBadge field={field} />
                   </td>
 
                   {/* REMARKS */}
+
                   <td className="px-4 py-3">
                     <div className="w-48 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                      {field.remarks || field.remark || "From Shape File"}
+                      {field.remarks || "From Shape File"}
                     </div>
                   </td>
                 </tr>

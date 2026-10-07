@@ -84,7 +84,7 @@ export default function HistoryRow({ item, index, onDownload, onDelete }) {
 
       {/* Actions */}
       <td className="px-6 py-4">
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col justify-end gap-2">
           <button
             type="button"
             onClick={() => onDownload(item.id)}

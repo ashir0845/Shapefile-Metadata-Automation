@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = "http://192.168.1.11:8000";
 
 export async function uploadShapefile(file) {
   const formData = new FormData();
@@ -30,7 +30,6 @@ export async function uploadShapefile(file) {
 // ============================================================
 // GENERATE + DOWNLOAD EXCEL
 // ============================================================
-
 
 export async function generateExcel(metadata) {
   const response = await fetch(`${API_BASE_URL}/metadata/generate-excel`, {

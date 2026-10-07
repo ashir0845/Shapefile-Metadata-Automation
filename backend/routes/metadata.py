@@ -24,6 +24,7 @@ from backend.services.metadata_service import (
     build_metadata,
 )
 from openpyxl.styles import PatternFill
+from openpyxl.styles.colors import Color
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -1187,6 +1188,103 @@ def ensure_attribute_capacity(
 
 
 # =========================================================
+# MISSING FIELD CHECK / RED HEADER
+# =========================================================
+
+RED_FONT_COLOR = "FFFF0000"
+
+
+def is_blank(
+    value: Any,
+) -> bool:
+    """
+    True when a value is missing.
+
+    0 is a real value (for example a range minimum),
+    so only None and empty text count as blank.
+    """
+
+    if value is None:
+
+        return True
+
+    return str(value).strip() == ""
+
+
+def get_missing_attribute_fields(
+    attribute: Dict[str, Any],
+) -> List[str]:
+    """
+    Return the names of the attribute fields that are empty.
+
+    Checked for every attribute:
+        Attribute Label, Attribute Definition,
+        Attribute Definition Source,
+        Attribute Unit of Measurement
+
+    Range Domain Minimum / Maximum are checked only for
+    numeric attributes (unit = "Numbers"). Text columns
+    have no numeric range, so a blank range is normal.
+    """
+
+    missing: List[str] = []
+
+    if is_blank(attribute.get("name")):
+        missing.append("Attribute Label")
+
+    if is_blank(attribute.get("definition")):
+        missing.append("Attribute Definition")
+
+    if is_blank(attribute.get("definition_source")):
+        missing.append("Attribute Definition Source")
+
+    if is_blank(attribute.get("unit")):
+        missing.append("Attribute Unit of Measurement")
+
+    if str(attribute.get("unit", "")).strip().lower() == "numbers":
+
+        if is_blank(attribute.get("range_min")):
+            missing.append("Range Domain Minimum")
+
+        if is_blank(attribute.get("range_max")):
+            missing.append("Range Domain Maximum")
+
+    return missing
+
+
+def mark_attribute_header_red(
+    worksheet,
+    header_row: int,
+):
+    """
+    Make the "Attribute #N" text in Column A red,
+    keeping the cell's existing font (name, size, bold).
+    """
+
+    cell = worksheet.cell(
+        row=header_row,
+        column=1,
+    )
+
+    if isinstance(
+        cell,
+        MergedCell,
+    ):
+
+        return
+
+    red_font = copy.copy(
+        cell.font
+    )
+
+    red_font.color = Color(
+        rgb=RED_FONT_COLOR
+    )
+
+    cell.font = red_font
+
+
+# =========================================================
 # WRITE ONE ATTRIBUTE
 # =========================================================
 
@@ -1385,10 +1483,33 @@ def write_single_attribute(
         "From Shape File",
     )
 
+    # =====================================================
+    # MARK INCOMPLETE ATTRIBUTES IN RED
+    #
+    # If any required field of this attribute is missing,
+    # the "Attribute #N" header text is shown in red.
+    # =====================================================
+
+    missing_fields = get_missing_attribute_fields(
+        attribute
+    )
+
+    if missing_fields:
+
+        mark_attribute_header_red(
+            worksheet,
+            start_row,
+        )
+
     print(
         f"Attribute #{attribute_number}: "
         f"{name} -> rows "
         f"{start_row}-{end_row}"
+        + (
+            f" | MISSING: {', '.join(missing_fields)}"
+            if missing_fields
+            else ""
+        )
     )
 
     return header_written
@@ -1452,6 +1573,70 @@ def remove_unused_attribute_blocks(
         f"{len(header_rows) - used_attributes} "
         f"(rows {first_unused_row} to end)"
     )
+
+
+# =========================================================
+# REMOVE EMPTY ROWS AT THE END OF THE SHEET
+# =========================================================
+
+def remove_trailing_blank_rows(
+    worksheet,
+):
+    """
+    Delete rows at the bottom of the sheet where Column A and
+    Column B are both empty (for example the template's closing
+    bordered row).
+    """
+
+    removed = 0
+
+    while worksheet.max_row > 1:
+
+        last_row = worksheet.max_row
+
+        value_a = worksheet.cell(
+            row=last_row,
+            column=1,
+        ).value
+
+        value_b = worksheet.cell(
+            row=last_row,
+            column=2,
+        ).value
+
+        if (
+            str(value_a or "").strip()
+            or str(value_b or "").strip()
+        ):
+
+            break
+
+        # A merged range on this row would be left behind
+        for merged_range in list(
+            worksheet.merged_cells.ranges
+        ):
+
+            if (
+                merged_range.min_row <= last_row
+                <= merged_range.max_row
+            ):
+
+                worksheet.unmerge_cells(
+                    str(merged_range)
+                )
+
+        worksheet.delete_rows(
+            last_row,
+            1,
+        )
+
+        removed += 1
+
+    if removed:
+
+        print(
+            f"Removed {removed} empty row(s) at the end."
+        )
 
 
 # =========================================================
@@ -1538,6 +1723,13 @@ def write_attributes(
     remove_unused_attribute_blocks(
         worksheet,
         len(attributes),
+    )
+
+    # The template ends with an empty bordered row after the
+    # last attribute block. It gets pushed to the bottom when
+    # blocks are added, so remove it from the final file.
+    remove_trailing_blank_rows(
+        worksheet
     )
 
 
