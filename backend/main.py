@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,7 +6,7 @@ from backend.database import Base, engine
 from backend.models.history import GeneratedFileHistory
 from backend.routes.history import router as history_router
 from backend.routes.metadata import router as metadata_router
-
+from backend.routes.auth import router as auth_router
 
 # =========================================================
 # DATABASE TABLES
@@ -38,17 +39,19 @@ app = FastAPI(
 # =========================================================
 # CORS
 # =========================================================
+CORS_ORIGINS = [
+    o.strip().rstrip("/")
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+    if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://192.168.1.11:5173",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -63,7 +66,7 @@ app.include_router(
 app.include_router(
     history_router
 )
-
+app.include_router(auth_router)
 
 # =========================================================
 # BASIC ENDPOINTS

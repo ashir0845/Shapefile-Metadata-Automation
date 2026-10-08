@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import zipfile
 import copy
+import uuid
 
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +73,18 @@ UPLOAD_ROOT = os.path.join(
 
 os.makedirs(
     UPLOAD_ROOT,
+    exist_ok=True,
+)
+
+# Generated Excel files are kept here (inside the backend folder)
+# so the OS cannot clear them and History downloads keep working.
+GENERATED_DIR = os.path.join(
+    BASE_DIR,
+    "generated",
+)
+
+os.makedirs(
+    GENERATED_DIR,
     exist_ok=True,
 )
 
@@ -1856,7 +1869,7 @@ async def upload_shapefile(
 
     zip_path = os.path.join(
         work_dir,
-        file.filename,
+        os.path.basename(file.filename),
     )
 
     extracted_dir = os.path.join(
@@ -2006,14 +2019,6 @@ async def upload_shapefile(
         # INTERNAL INFORMATION
         # =================================================
 
-        metadata["_dbf_path"] = (
-            dbf_path
-        )
-
-        metadata["_shp_path"] = (
-            shp_path
-        )
-
         metadata["_template_path"] = (
             TEMPLATE_PATH
         )
@@ -2084,6 +2089,16 @@ async def upload_shapefile(
         raise HTTPException(
             status_code=500,
             detail=str(exc),
+        )
+
+    finally:
+
+        # The ZIP and the extracted shapefile are only needed
+        # while the metadata is being built. Remove them now,
+        # whether the upload succeeded or failed.
+        shutil.rmtree(
+            work_dir,
+            ignore_errors=True,
         )
 
 
@@ -2194,10 +2209,7 @@ async def generate_metadata_excel(
         # OUTPUT DIRECTORY
         # =================================================
 
-        output_dir = os.path.join(
-            UPLOAD_ROOT,
-            "generated",
-        )
+        output_dir = GENERATED_DIR
 
         os.makedirs(
             output_dir,
@@ -2237,9 +2249,12 @@ async def generate_metadata_excel(
             "_metadata.xlsx"
         )
 
+        # Unique stored name: two exports with the same name no
+        # longer overwrite each other, and deleting one History
+        # record can never delete another record's file.
         output_path = os.path.join(
             output_dir,
-            output_filename,
+            f"{safe_filename}_{uuid.uuid4().hex[:8]}_metadata.xlsx",
         )
         # =================================================
 # REMOVE ALL BACKGROUND COLORS

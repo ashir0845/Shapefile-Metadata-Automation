@@ -1,36 +1,45 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Route,
+  Routes,
+} from "react-router-dom";
 
 import MetadataGenerator from "./pages/MetadataGenerator";
 import History from "./pages/History";
 import Help from "./pages/Help";
+import Login from "./pages/Login";
 
 import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Common Layout */}
-        <Route element={<Layout />}>
-          
-          {/* Home */}
-          <Route
-            path="/"
-            element={<MetadataGenerator />}
-          />
+        {/* Public */}
+        <Route
+          path="/login"
+          element={<Login />}
+        />
 
-          {/* History */}
-          <Route
-            path="/history"
-            element={<History />}
-          />
+        {/* Protected */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<Layout />}>
+            <Route
+              path="/"
+              element={<MetadataGenerator />}
+            />
 
-          {/* Help */}
-          <Route
-            path="/help"
-            element={<Help />}
-          />
+            <Route
+              path="/history"
+              element={<History />}
+            />
 
+            <Route
+              path="/help"
+              element={<Help />}
+            />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

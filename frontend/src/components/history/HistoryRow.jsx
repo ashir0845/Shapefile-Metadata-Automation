@@ -84,11 +84,11 @@ export default function HistoryRow({ item, index, onDownload, onDelete }) {
 
       {/* Actions */}
       <td className="px-6 py-4">
-        <div className="flex flex-col justify-end gap-2">
+        <div className="flex flex-col justify-start gap-2">
           <button
             type="button"
             onClick={() => onDownload(item.id)}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-lg bg-blue-600 px-1 py-1 text-sm font-medium text-white hover:bg-blue-700"
           >
             Download
           </button>
@@ -96,7 +96,7 @@ export default function HistoryRow({ item, index, onDownload, onDelete }) {
           <button
             type="button"
             onClick={() => onDelete(item.id)}
-            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+            className="rounded-lg bg-red-600 px-1 py-1 text-sm font-medium text-white hover:bg-red-700"
           >
             Delete
           </button>

@@ -1,28 +1,35 @@
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
 function Layout() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f4f7fb]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#f4f7fb]">
+      {/* ======================================================
+          FULL WIDTH HEADER
+      ====================================================== */}
 
-      {/* SIDEBAR */}
-      <Sidebar />
-
-      {/* RIGHT SIDE */}
-      <div className="flex min-w-0 flex-1 flex-col">
-
-        {/* HEADER */}
+      <div className="shrink-0">
         <Header />
-
-        {/* PAGE CONTENT */}
-        <main className="min-h-0 flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
-
       </div>
 
+      {/* ======================================================
+          SIDEBAR + CONTENT
+      ====================================================== */}
+
+      <div className="flex min-h-0 flex-1">
+        {/* SIDEBAR */}
+        <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+
+        {/* PAGE CONTENT */}
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

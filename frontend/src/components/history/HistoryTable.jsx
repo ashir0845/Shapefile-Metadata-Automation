@@ -1,80 +1,61 @@
 import { useEffect, useState } from "react";
+
 import HistoryEmpty from "./HistoryEmpty";
 import HistoryRow from "./HistoryRow";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+import { getHistory, downloadHistory, deleteHistory } from "../../services/api";
 
 export default function HistoryTable() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // ============================================================
+  // FETCH HISTORY
+  // ============================================================
+
   const fetchHistory = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await fetch(`${API_BASE_URL}/api/history`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch history. Status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await getHistory();
 
       setHistory(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("History fetch error:", err);
+
       setError("Unable to load history.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ============================================================
+  // LOAD HISTORY ON PAGE LOAD
+  // ============================================================
+
   useEffect(() => {
     fetchHistory();
   }, []);
 
+  // ============================================================
+  // DOWNLOAD HISTORY EXCEL
+  // ============================================================
+
   const handleDownload = async (historyId) => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/history/${historyId}/download`,
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to download file.");
-      }
-
-      const blob = await response.blob();
-
-      const contentDisposition = response.headers.get("content-disposition");
-
-      let filename = "metadata.xlsx";
-
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^"]+)"?/i);
-
-        if (match?.[1]) {
-          filename = match[1];
-        }
-      }
-
-      const url = window.URL.createObjectURL(blob);
-
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-
-      document.body.appendChild(link);
-      link.click();
-
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      await downloadHistory(historyId);
     } catch (err) {
       console.error("Download error:", err);
+
       alert("Unable to download the Excel file.");
     }
   };
+
+  // ============================================================
+  // DELETE HISTORY
+  // ============================================================
 
   const handleDelete = async (historyId) => {
     const confirmed = window.confirm(
@@ -86,24 +67,22 @@ export default function HistoryTable() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/history/${historyId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to delete history.");
-      }
+      await deleteHistory(historyId);
 
       setHistory((previousHistory) =>
         previousHistory.filter((item) => item.id !== historyId),
       );
     } catch (err) {
       console.error("Delete history error:", err);
+
       alert("Unable to delete the history record.");
     }
   };
 
-  // Loading state
+  // ============================================================
+  // LOADING STATE
+  // ============================================================
+
   if (loading) {
     return (
       <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-gray-200 bg-white">
@@ -116,7 +95,10 @@ export default function HistoryTable() {
     );
   }
 
-  // Error state
+  // ============================================================
+  // ERROR STATE
+  // ============================================================
+
   if (error) {
     return (
       <div className="flex min-h-[300px] items-center justify-center rounded-xl border border-red-200 bg-white">
@@ -139,52 +121,57 @@ export default function HistoryTable() {
     );
   }
 
-  // Empty state
+  // ============================================================
+  // EMPTY STATE
+  // ============================================================
+
   if (history.length === 0) {
     return <HistoryEmpty />;
   }
+
+  // ============================================================
+  // HISTORY TABLE
+  // ============================================================
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px]">
-          <thead className="bg-gray-50">
+          <thead className="bg-gradient-to-br from-[#0b1f3a] via-[#102f52] to-[#163e68]">
             <tr>
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 #
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 File Name
               </th>
 
-              {/* NEW */}
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Entity
               </th>
 
-              {/* NEW */}
-              <th className="whitespace-nowrap px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="whitespace-nowrap px-6 py-4 text-left text-sm font-semibold text-white">
                 Data Published
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Created At
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Records
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Attributes
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Status
               </th>
 
-              <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+              <th className="px-6 py-4 text-left text-sm font-semibold text-white">
                 Actions
               </th>
             </tr>

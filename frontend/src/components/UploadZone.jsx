@@ -1,9 +1,5 @@
 import { useRef, useState } from "react";
-import {
-  UploadCloud,
-  FileArchive,
-  X,
-} from "lucide-react";
+import { UploadCloud, FileArchive, X } from "lucide-react";
 import { uploadShapefile } from "../services/api";
 
 function UploadZone({ onUploadSuccess }) {
@@ -20,23 +16,12 @@ function UploadZone({ onUploadSuccess }) {
       return;
     }
 
-    if (
-      !selectedFile.name
-        .toLowerCase()
-        .endsWith(".zip")
-    ) {
-      setError(
-        "Please upload a Shapefile ZIP file."
-      );
+    if (!selectedFile.name.toLowerCase().endsWith(".zip")) {
+      setError("Please upload a Shapefile ZIP file.");
       return;
     }
 
-    if (selectedFile.size > 50 * 1024 * 1024 * 1024) {
-      setError(
-        "File size must be less than 50 MB."
-      );
-      return;
-    }
+    
 
     setFile(selectedFile);
   };
@@ -48,17 +33,14 @@ function UploadZone({ onUploadSuccess }) {
   const handleDrop = (event) => {
     event.preventDefault();
 
-    const droppedFile =
-      event.dataTransfer.files?.[0];
+    const droppedFile = event.dataTransfer.files?.[0];
 
     handleFile(droppedFile);
   };
 
   const handleUpload = async () => {
     if (!file) {
-      setError(
-        "Please select a ZIP file first."
-      );
+      setError("Please select a ZIP file first.");
       return;
     }
 
@@ -66,13 +48,9 @@ function UploadZone({ onUploadSuccess }) {
       setLoading(true);
       setError("");
 
-      const result =
-        await uploadShapefile(file);
+      const result = await uploadShapefile(file);
 
-      console.log(
-        "Metadata received:",
-        result
-      );
+      console.log("Metadata received:", result);
 
       if (onUploadSuccess) {
         onUploadSuccess(result);
@@ -80,10 +58,7 @@ function UploadZone({ onUploadSuccess }) {
     } catch (err) {
       console.error(err);
 
-      setError(
-        err.message ||
-          "Unable to upload the shapefile."
-      );
+      setError(err.message || "Unable to upload the shapefile.");
     } finally {
       setLoading(false);
     }
@@ -103,29 +78,20 @@ function UploadZone({ onUploadSuccess }) {
       {/* DROP ZONE */}
       {!file && (
         <div
-          onDragOver={(event) =>
-            event.preventDefault()
-          }
+          onDragOver={(event) => event.preventDefault()}
           onDrop={handleDrop}
-          onClick={() =>
-            inputRef.current?.click()
-          }
+          onClick={() => inputRef.current?.click()}
           className="group flex min-h-[190px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-5 py-8 transition hover:border-blue-400 hover:bg-blue-50/30"
         >
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50">
-            <UploadCloud
-              size={31}
-              className="text-blue-600"
-            />
+            <UploadCloud size={31} className="text-blue-600" />
           </div>
 
           <h3 className="text-sm font-bold text-slate-800 sm:text-base">
             Drag and drop your ZIP file here
           </h3>
 
-          <p className="mt-1 text-xs text-slate-500">
-            or
-          </p>
+          <p className="mt-1 text-xs text-slate-500">or</p>
 
           <button
             type="button"
@@ -138,11 +104,7 @@ function UploadZone({ onUploadSuccess }) {
             Choose File
           </button>
 
-          <p className="mt-3 text-xs text-slate-400">
-            Supported format: .zip
-            <span className="mx-2">|</span>
-            Max size: 50 MB
-          </p>
+          <p className="mt-3 text-xs text-slate-400">Supported format: .zip</p>
 
           <input
             ref={inputRef}
@@ -160,10 +122,7 @@ function UploadZone({ onUploadSuccess }) {
           <div className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-50">
-                <FileArchive
-                  size={22}
-                  className="text-emerald-600"
-                />
+                <FileArchive size={22} className="text-emerald-600" />
               </div>
 
               <div className="min-w-0">
@@ -172,10 +131,7 @@ function UploadZone({ onUploadSuccess }) {
                 </p>
 
                 <p className="mt-0.5 text-xs text-slate-400">
-                  {(file.size / 1024 / 1024).toFixed(
-                    2
-                  )}{" "}
-                  MB
+                  {(file.size / 1024 / 1024).toFixed(2)} MB
                 </p>
               </div>
             </div>
@@ -206,9 +162,7 @@ function UploadZone({ onUploadSuccess }) {
           disabled={loading}
           className="mt-4 flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {loading
-            ? "Analyzing Shapefile..."
-            : "Validate Shapefile"}
+          {loading ? "Analyzing Shapefile..." : "Validate Shapefile"}
         </button>
       )}
     </div>

@@ -180,6 +180,8 @@ def calculate_shapefile_bounds(
 
     bbox = reader.bbox
 
+    reader.close()
+
     # Fail loudly instead of silently writing blank cells
     if not bbox or len(bbox) < 4:
         raise ValueError(
@@ -847,6 +849,10 @@ def read_shapefile_attributes(
     )
 
     shape_count = len(reader)
+
+    # Everything needed from the shapefile is already in memory.
+    # Close it so the files can be deleted (important on Windows).
+    reader.close()
 
     bounds = calculate_shapefile_bounds(
         shp_path

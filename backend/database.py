@@ -1,23 +1,63 @@
+import os
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from urllib.parse import quote_plus
+from sqlalchemy.engine import URL
 
 
-DB_USER = "postgres"
-DB_PASSWORD = "ashir@123"
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_NAME = "gis_metadata"
-
-DATABASE_URL = (
-    f"postgresql+psycopg://{DB_USER}:"
-    f"{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+load_dotenv(
+    os.path.join(
+        os.path.dirname(
+            os.path.abspath(__file__)
+        ),
+        ".env",
+    )
 )
+
+
+def _require(name):
+    value = os.getenv(name)
+
+    if not value:
+        raise RuntimeError(
+            f"Missing setting {name} in backend/.env"
+        )
+
+    return value
+
+
+DB_USER = _require("DB_USER")
+DB_PASSWORD = _require("DB_PASSWORD")
+
+DB_HOST = os.getenv(
+    "DB_HOST",
+    "localhost",
+)
+
+DB_PORT = os.getenv(
+    "DB_PORT",
+    "5432",
+)
+
+DB_NAME = _require("DB_NAME")
+
+
+DATABASE_URL = URL.create(
+    "postgresql+psycopg",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=int(DB_PORT),
+    database=DB_NAME,
+)
+
 
 engine = create_engine(
     DATABASE_URL,
     echo=False,
 )
+
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -25,12 +65,15 @@ SessionLocal = sessionmaker(
     bind=engine,
 )
 
+
 Base = declarative_base()
 
 
 def get_db():
     db = SessionLocal()
+
     try:
         yield db
+
     finally:
         db.close()
