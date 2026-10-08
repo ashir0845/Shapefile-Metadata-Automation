@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import logo from "../assets/logo.png";
+import logo from "../../assets/logo.png";
 
 function Header() {
   const navigate = useNavigate();
@@ -62,7 +62,7 @@ function Header() {
 
         <div className="min-w-0">
           <h1 className="ml-2 truncate text-lg font-bold text-white sm:ml-5 sm:text-4xl">
-            SHAPEFILE METADATA AUTOMATION
+            Shapefile Metadata Automation
           </h1>
         </div>
       </div>

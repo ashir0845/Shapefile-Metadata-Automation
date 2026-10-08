@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
-import Stepper from "../components/Stepper";
-import UploadZone from "../components/UploadZone";
-import RequiredFiles from "../components/RequiredFiles";
-import DetectedInfo from "../components/DetectedInfo";
-import RecentActivity from "../components/RecentActivity";
+import Stepper from "../components/metadatagenerator/Stepper";
+import UploadZone from "../components/metadatagenerator/UploadZone";
+import RequiredFiles from "../components/metadatagenerator/RequiredFiles";
+import DetectedInfo from "../components/metadatagenerator/DetectedInfo";
+import RecentActivity from "../components/metadatagenerator/RecentActivity";
 
 import { generateExcel } from "../services/api";
 

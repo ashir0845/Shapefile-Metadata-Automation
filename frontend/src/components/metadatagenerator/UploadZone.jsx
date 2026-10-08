@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { UploadCloud, FileArchive, X } from "lucide-react";
-import { uploadShapefile } from "../services/api";
+import { uploadShapefile } from "../../services/api";
 
 function UploadZone({ onUploadSuccess }) {
   const inputRef = useRef(null);

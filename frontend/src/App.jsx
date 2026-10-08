@@ -9,8 +9,8 @@ import History from "./pages/History";
 import Help from "./pages/Help";
 import Login from "./pages/Login";
 
-import Layout from "./components/Layout";
-import ProtectedRoute from "./components/ProtectedRoute";
+import Layout from "./components/metadatagenerator/Layout";
+import ProtectedRoute from "./components/metadatagenerator/ProtectedRoute";
 
 function App() {
   return (
