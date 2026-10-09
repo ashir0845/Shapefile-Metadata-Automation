@@ -8,9 +8,11 @@ import MetadataGenerator from "./pages/MetadataGenerator";
 import History from "./pages/History";
 import Help from "./pages/Help";
 import Login from "./pages/Login";
+import AdminPanel from "./pages/AdminPanel";
 
 import Layout from "./components/metadatagenerator/Layout";
 import ProtectedRoute from "./components/metadatagenerator/ProtectedRoute";
+import AdminRoute from "./components/metadatagenerator/AdminRoute";
 
 function App() {
   return (
@@ -22,7 +24,7 @@ function App() {
           element={<Login />}
         />
 
-        {/* Protected */}
+        {/* Protected (any logged-in user) */}
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route
@@ -39,6 +41,14 @@ function App() {
               path="/help"
               element={<Help />}
             />
+
+            {/* Admin only */}
+            <Route element={<AdminRoute />}>
+              <Route
+                path="/admin"
+                element={<AdminPanel />}
+              />
+            </Route>
           </Route>
         </Route>
       </Routes>

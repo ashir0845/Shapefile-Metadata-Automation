@@ -3,10 +3,12 @@ import {
   History as HistoryIcon,
   CircleHelp,
   Menu,
+  Shield,
   X,
 } from "lucide-react";
 
 import { NavLink, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 /* ============================================================
    SIDEBAR
@@ -17,13 +19,17 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
 
   const isHomeActive = pathname === "/";
 
+  // Admin tab is shown only to admins.
+  const isAdmin =
+    sessionStorage.getItem("role") === "Admin";
+
   /* ==========================================================
      HOME
   ========================================================== */
+  const navigate = useNavigate();
 
   const handleHomeClick = () => {
-    setMobileOpen?.(false);
-    window.location.replace("/");
+    navigate("/");
   };
 
   /* ==========================================================
@@ -71,11 +77,7 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
           text-white shadow-2xl
           transition-transform duration-300 ease-in-out
           lg:static lg:z-auto lg:w-[200px] lg:translate-x-0 lg:shadow-none
-          ${
-            mobileOpen
-              ? "translate-x-0"
-              : "-translate-x-full"
-          }
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
         {/* ====================================================
@@ -83,9 +85,7 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
         ==================================================== */}
 
         <div className="flex items-center justify-between px-4 py-4 lg:hidden">
-          <span className="text-sm font-semibold text-blue-100">
-            Menu
-          </span>
+          <span className="text-sm font-semibold text-blue-100">Menu</span>
 
           <button
             type="button"
@@ -122,10 +122,7 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
               HISTORY
           ================================================== */}
 
-          <NavLink
-            to="/history"
-            onClick={() => setMobileOpen?.(false)}
-          >
+          <NavLink to="/history" onClick={() => setMobileOpen?.(false)}>
             {({ isActive }) => (
               <SidebarItem
                 icon={<HistoryIcon size={22} />}
@@ -136,13 +133,26 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
           </NavLink>
 
           {/* ==================================================
+              ADMIN (admins only)
+          ================================================== */}
+
+          {isAdmin && (
+            <NavLink to="/admin" onClick={() => setMobileOpen?.(false)}>
+              {({ isActive }) => (
+                <SidebarItem
+                  icon={<Shield size={22} />}
+                  label="Admin"
+                  active={isActive}
+                />
+              )}
+            </NavLink>
+          )}
+
+          {/* ==================================================
               HELP
           ================================================== */}
 
-          <NavLink
-            to="/help"
-            onClick={() => setMobileOpen?.(false)}
-          >
+          <NavLink to="/help" onClick={() => setMobileOpen?.(false)}>
             {({ isActive }) => (
               <SidebarItem
                 icon={<CircleHelp size={22} />}
@@ -158,13 +168,9 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
         ==================================================== */}
 
         <div className="px-8 pb-7">
-          <p className="text-xs text-blue-200/70">
-            GIS Metadata Generator
-          </p>
+          <p className="text-xs text-blue-200/70">GIS Metadata Generator</p>
 
-          <p className="mt-1 text-xs text-blue-200/50">
-            v1.0
-          </p>
+          <p className="mt-1 text-xs text-blue-200/50">v1.0</p>
         </div>
       </aside>
     </>
@@ -175,11 +181,7 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
    SIDEBAR ITEM
 ============================================================ */
 
-function SidebarItem({
-  icon,
-  label,
-  active = false,
-}) {
+function SidebarItem({ icon, label, active = false }) {
   return (
     <div
       className={`mb-2 flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left text-sm font-semibold transition ${

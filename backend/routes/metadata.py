@@ -31,6 +31,9 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.history import GeneratedFileHistory
 
+from backend.auth_utils import get_current_user
+from backend.models.user import User
+
 # =========================================================
 # ROUTER
 # =========================================================
@@ -93,61 +96,36 @@ os.makedirs(
 # FILE HELPERS
 # =========================================================
 
-def find_dbf_file(
-    directory: str,
-) -> Optional[str]:
-    """
-    Find the first DBF file recursively.
-    """
 
-    for root, _, files in os.walk(directory):
+def find_shapefile_components(directory: str) -> dict:
+    """Find required shapefile components recursively."""
+    required = {".shp", ".shx", ".dbf", ".prj"}
+    found = {}
 
-        # Skip macOS junk folders/files inside ZIPs
-        if "__MACOSX" in root:
-            continue
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [
+            folder
+            for folder in dirs
+            if folder != "__MACOSX"
+        ]
 
         for filename in files:
-
             if filename.startswith("._"):
                 continue
 
-            if filename.lower().endswith(".dbf"):
+            extension = os.path.splitext(filename)[1].lower()
 
-                return os.path.join(
-                    root,
-                    filename,
+            if extension in required:
+                found.setdefault(extension, []).append(
+                    os.path.join(root, filename)
                 )
 
-    return None
+    missing = sorted(required - set(found))
 
-
-def find_shp_file(
-    directory: str,
-) -> Optional[str]:
-    """
-    Find the first SHP file recursively.
-    """
-
-    for root, _, files in os.walk(directory):
-
-        # Skip macOS junk folders/files inside ZIPs
-        if "__MACOSX" in root:
-            continue
-
-        for filename in files:
-
-            if filename.startswith("._"):
-                continue
-
-            if filename.lower().endswith(".shp"):
-
-                return os.path.join(
-                    root,
-                    filename,
-                )
-
-    return None
-
+    return {
+        "found": found,
+        "missing": missing,
+    }
 
 # =========================================================
 # EXCEL SHEET
@@ -1960,51 +1938,40 @@ async def upload_shapefile(
                 ),
             )
 
+        
         # =================================================
-        # FIND DBF AND SHP
+        # VALIDATE ALL FOUR SHAPEFILE COMPONENTS
         # =================================================
 
-        dbf_path = find_dbf_file(
+        components = find_shapefile_components(
             extracted_dir
         )
 
-        shp_path = find_shp_file(
-            extracted_dir
-        )
+        missing_files = components["missing"]
 
-        if not dbf_path:
+        if missing_files:
+            missing_text = ", ".join(missing_files)
 
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "No .dbf file found inside "
-                    "the uploaded ZIP."
+                    f"Missing required shapefile file(s): "
+                    f"{missing_text}. The ZIP must contain "
+                    ".shp, .shx, .dbf, and .prj files."
                 ),
             )
 
-        if not shp_path:
+        shp_path = components["found"][".shp"][0]
+        dbf_path = components["found"][".dbf"][0]
 
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "No .shp file found inside "
-                    "the uploaded ZIP."
-                ),
-            )
+        print(f"SHP found: {shp_path}")
+        print(f"SHX found: {components['found']['.shx'][0]}")
+        print(f"DBF found: {dbf_path}")
+        print(f"PRJ found: {components['found']['.prj'][0]}")
 
-        print(
-            f"DBF found: {dbf_path}"
-        )
+        print(f"Template found: {TEMPLATE_PATH}")
 
-        print(
-            f"SHP found: {shp_path}"
-        )
-
-        print(
-            f"Template found: "
-            f"{TEMPLATE_PATH}"
-        )
-
+     
         # =================================================
         # BUILD METADATA
         # =================================================
@@ -2110,8 +2077,8 @@ async def upload_shapefile(
 async def generate_metadata_excel(
     metadata: Dict[str, Any],
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-
     if not os.path.exists(
         TEMPLATE_PATH
     ):
@@ -2297,6 +2264,8 @@ async def generate_metadata_excel(
         )
 
         history_record = GeneratedFileHistory(
+            user_id=current_user.id,
+            owner_username=current_user.username,
             filename=output_filename,
             original_filename=metadata.get("filename"),
             entity=entity or None,

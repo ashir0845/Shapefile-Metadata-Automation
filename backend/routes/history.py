@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from backend.auth_utils import get_current_user
 from backend.database import get_db
 from backend.models.history import GeneratedFileHistory
+from backend.models.user import User
 
 
 router = APIRouter(
@@ -32,77 +34,105 @@ def serialize_created_at(value):
     return value.astimezone(timezone.utc).isoformat()
 
 
+def serialize_history_record(record, username=None) -> dict:
+    return {
+        "id": record.id,
+        "user_id": record.user_id,
+        "username": username,
+        "filename": record.filename,
+        "original_filename": record.original_filename,
+
+        # Exact Entity Label value.
+        "entity": record.entity,
+
+        # Exact complete Publication Date value.
+        "publication_date": record.publication_date,
+
+        # Backward-compatible field.
+        "year": (
+            record.publication_date
+            if record.publication_date
+            else (
+                str(record.year)
+                if record.year is not None
+                else None
+            )
+        ),
+
+        "created_at": serialize_created_at(
+            record.created_at
+        ),
+
+        "records_count": record.records_count,
+        "attributes_count": record.attributes_count,
+        "status": record.status,
+    }
+
+
+def find_accessible_record(
+    db: Session,
+    history_id: int,
+    current_user: User,
+) -> GeneratedFileHistory:
+    """
+    Users may only access their own records; admins may access any.
+    Missing and not-allowed both return 404 so ids are not leaked.
+    """
+
+    record = (
+        db.query(GeneratedFileHistory)
+        .filter(GeneratedFileHistory.id == history_id)
+        .first()
+    )
+
+    if record is None or (
+        current_user.role != "Admin"
+        and record.user_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="History record not found.",
+        )
+
+    return record
+
+
 @router.get("")
 def get_history(
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     records = (
         db.query(GeneratedFileHistory)
+        .filter(
+            GeneratedFileHistory.user_id == current_user.id
+        )
         .order_by(
             GeneratedFileHistory.created_at.desc()
         )
         .all()
     )
 
-    history = []
-
-    for record in records:
-        history.append(
-            {
-                "id": record.id,
-                "filename": record.filename,
-                "original_filename": record.original_filename,
-
-                # Exact Entity Label value.
-                "entity": record.entity,
-
-                # Exact complete Publication Date value.
-                "publication_date": record.publication_date,
-
-                # Backward-compatible field.
-                # New records use publication_date for the
-                # History table's "Year" column.
-                "year": (
-                    record.publication_date
-                    if record.publication_date
-                    else (
-                        str(record.year)
-                        if record.year is not None
-                        else None
-                    )
-                ),
-
-                "created_at": serialize_created_at(
-                    record.created_at
-                ),
-
-                "records_count": record.records_count,
-                "attributes_count": record.attributes_count,
-                "status": record.status,
-            }
+    return [
+        serialize_history_record(
+            record,
+            current_user.username,
         )
-
-    return history
+        for record in records
+    ]
 
 
 @router.get("/{history_id}/download")
 def download_history_file(
     history_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    record = (
-        db.query(GeneratedFileHistory)
-        .filter(
-            GeneratedFileHistory.id == history_id
-        )
-        .first()
+    record = find_accessible_record(
+        db,
+        history_id,
+        current_user,
     )
-
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail="History record not found.",
-        )
 
     if not os.path.exists(
         record.generated_file_path
@@ -127,21 +157,14 @@ def download_history_file(
 @router.delete("/{history_id}")
 def delete_history(
     history_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    record = (
-        db.query(GeneratedFileHistory)
-        .filter(
-            GeneratedFileHistory.id == history_id
-        )
-        .first()
+    record = find_accessible_record(
+        db,
+        history_id,
+        current_user,
     )
-
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail="History record not found.",
-        )
 
     # Delete the generated Excel file first.
     if os.path.exists(

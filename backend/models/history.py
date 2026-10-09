@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
@@ -15,6 +15,21 @@ class GeneratedFileHistory(Base):
         index=True,
     )
 
+    # Owner of the generated file. NULL for records created
+    # before per-user history existed (admins only).
+    user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+       # Username saved when the file was generated. Kept even if
+    # the user is deleted, so history still shows who made it.
+    owner_username: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    
     filename: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -32,21 +47,14 @@ class GeneratedFileHistory(Base):
         nullable=True,
     )
 
-    # This stores the COMPLETE value from:
-    # "Publication Date"
-    #
-    # Example:
-    # "31st March 2025 (Current Date)"
-    #
-    # It intentionally stores the complete text rather than
-    # extracting only "2025".
+    # This stores the COMPLETE value from "Publication Date".
+    # Example: "31st March 2025 (Current Date)"
     publication_date: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
 
-    # Kept for compatibility with history records created by
-    # the earlier version of the application.
+    # Kept for compatibility with earlier records.
     year: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,

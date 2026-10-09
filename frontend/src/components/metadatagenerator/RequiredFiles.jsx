@@ -35,7 +35,7 @@ function RequiredFiles() {
     {
       extension: ".prj",
       label: "Projection information",
-      required: false,
+      required: true,
       icon: Map,
       bg: "bg-purple-50",
       text: "text-purple-600",

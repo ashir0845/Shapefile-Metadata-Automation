@@ -1,3 +1,5 @@
+import { Download, Trash2 } from "lucide-react";
+
 export default function HistoryRow({ item, index, onDownload, onDelete }) {
   const formatDateTime = (dateString) => {
     if (!dateString) {
@@ -83,21 +85,24 @@ export default function HistoryRow({ item, index, onDownload, onDelete }) {
       </td>
 
       {/* Actions */}
-      <td className="px-6 py-4">
-        <div className="flex flex-col justify-start gap-2">
+      {/* Actions */}
+      <td className="whitespace-nowrap px-4 py-4">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onDownload(item.id)}
-            className="rounded-lg bg-blue-600 px-1 py-1 text-sm font-medium text-white hover:bg-blue-700"
+            className="flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-semibold text-[#285596] transition hover:bg-blue-50"
           >
+            <Download size={12} />
             Download
           </button>
 
           <button
             type="button"
             onClick={() => onDelete(item.id)}
-            className="rounded-lg bg-red-600 px-1 py-1 text-sm font-medium text-white hover:bg-red-700"
+            className="flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50"
           >
+            <Trash2 size={12} />
             Delete
           </button>
         </div>

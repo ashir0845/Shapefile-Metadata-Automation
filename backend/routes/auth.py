@@ -1,14 +1,16 @@
-from datetime import datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from passlib.context import CryptContext
-from jose import jwt
-
-from ..database import get_db
-from ..models import User
+from backend.auth_utils import (
+    MIN_PASSWORD_LENGTH,
+    create_access_token,
+    get_current_user,
+    pwd_context,
+)
+from backend.database import get_db
+from backend.models.user import User
 
 
 router = APIRouter(
@@ -17,127 +19,108 @@ router = APIRouter(
 )
 
 
-pwd_context = CryptContext(
-    schemes=["pbkdf2_sha256"],
-    deprecated="auto",
-)
-
-
-SECRET_KEY = "change-this-to-a-long-random-secret"
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 8
-
-
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
-
-
 class LoginRequest(BaseModel):
+    # Accepts either the username or the email address.
     username: str
     password: str
 
 
-@router.post("/register")
-def register(
-    request: RegisterRequest,
-    db: Session = Depends(get_db),
-):
-    username = request.username.strip()
-    password = request.password
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
-    if not username:
-        raise HTTPException(
-            status_code=400,
-            detail="Username is required",
-        )
 
-    if not password:
-        raise HTTPException(
-            status_code=400,
-            detail="Password is required",
-        )
-
-    existing_user = (
-        db.query(User)
-        .filter(User.username == username)
-        .first()
-    )
-
-    if existing_user:
-        raise HTTPException(
-            status_code=400,
-            detail="Username already exists",
-        )
-
-    password_hash = pwd_context.hash(password)
-
-    user = User(
-        username=username,
-        password_hash=password_hash,
-        role="User",
-    )
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    return {
-        "message": "User registered successfully",
-        "username": user.username,
-        "role": user.role,
-    }
-
+# =========================================================
+# LOGIN (username or email)
+# =========================================================
 
 @router.post("/login")
 def login(
     request: LoginRequest,
     db: Session = Depends(get_db),
 ):
-    username = request.username.strip()
-    password = request.password
+    identifier = request.username.strip()
 
     user = (
         db.query(User)
-        .filter(User.username == username)
+        .filter(
+            or_(
+                User.username == identifier,
+                func.lower(User.email) == identifier.lower(),
+            )
+        )
         .first()
     )
 
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password",
-        )
-
-    password_valid = pwd_context.verify(
-        password,
+    if user is None or not pwd_context.verify(
+        request.password,
         user.password_hash,
-    )
-
-    if not password_valid:
+    ):
         raise HTTPException(
             status_code=401,
-            detail="Invalid username or password",
+            detail="Invalid username/email or password",
         )
 
-    token_data = {
-        "sub": str(user.id),
-        "username": user.username,
-        "role": user.role,
-        "exp": datetime.utcnow()
-        + timedelta(hours=TOKEN_EXPIRE_HOURS),
-    }
-
-    token = jwt.encode(
-        token_data,
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This account has been deactivated. "
+                "Please contact an administrator."
+            ),
+        )
 
     return {
         "message": "Login successful",
-        "access_token": token,
+        "access_token": create_access_token(user),
         "token_type": "bearer",
         "username": user.username,
         "role": user.role,
+    }
+
+
+# =========================================================
+# CHANGE PASSWORD (any logged-in user)
+# =========================================================
+
+@router.post("/change-password")
+def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not pwd_context.verify(
+        request.current_password,
+        current_user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect.",
+        )
+
+    if len(request.new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "New password must be at least "
+                f"{MIN_PASSWORD_LENGTH} characters."
+            ),
+        )
+
+    if request.new_password == request.current_password:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "New password must be different "
+                "from the current password."
+            ),
+        )
+
+    current_user.password_hash = pwd_context.hash(
+        request.new_password
+    )
+    db.commit()
+
+    return {
+        "message": "Password changed successfully."
     }

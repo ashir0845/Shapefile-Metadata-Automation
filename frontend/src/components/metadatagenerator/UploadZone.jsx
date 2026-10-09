@@ -1,6 +1,55 @@
+
 import { useRef, useState } from "react";
 import { UploadCloud, FileArchive, X } from "lucide-react";
+import JSZip from "jszip";
 import { uploadShapefile } from "../../services/api";
+
+const REQUIRED_FILES = [".shp", ".shx", ".dbf", ".prj"];
+
+async function validateShapefileZip(file) {
+  let zip;
+
+  try {
+    zip = await JSZip.loadAsync(file);
+  } catch {
+    throw new Error(
+      "The selected file is not a valid ZIP archive."
+    );
+  }
+
+  const extensions = new Set();
+
+  Object.entries(zip.files).forEach(([path, entry]) => {
+    if (entry.dir) return;
+
+    // Ignore macOS metadata files.
+    if (
+      path.includes("__MACOSX/") ||
+      path.split("/").pop().startsWith("._")
+    ) {
+      return;
+    }
+
+    const filename = path.split("/").pop();
+    const extension = filename.includes(".")
+      ? `.${filename.split(".").pop().toLowerCase()}`
+      : "";
+
+    if (extension) {
+      extensions.add(extension);
+    }
+  });
+
+  const missingFiles = REQUIRED_FILES.filter(
+    (extension) => !extensions.has(extension)
+  );
+
+  if (missingFiles.length > 0) {
+    throw new Error(
+      `Missing required shapefile file(s): ${missingFiles.join(", ")}. Please add all four files (.shp, .shx, .dbf, .prj) and upload the ZIP again.`
+    );
+  }
+}
 
 function UploadZone({ onUploadSuccess }) {
   const inputRef = useRef(null);
@@ -9,21 +58,32 @@ function UploadZone({ onUploadSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleFile = (selectedFile) => {
+  const handleFile = async (selectedFile) => {
     setError("");
+    setFile(null);
 
-    if (!selectedFile) {
-      return;
+    if (inputRef.current) {
+      inputRef.current.value = "";
     }
+
+    if (!selectedFile) return;
 
     if (!selectedFile.name.toLowerCase().endsWith(".zip")) {
       setError("Please upload a Shapefile ZIP file.");
       return;
     }
 
-    
+    try {
+      setLoading(true);
 
-    setFile(selectedFile);
+      await validateShapefileZip(selectedFile);
+
+      setFile(selectedFile);
+    } catch (err) {
+      setError(err.message || "Unable to validate the ZIP file.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInputChange = (event) => {
@@ -32,15 +92,12 @@ function UploadZone({ onUploadSuccess }) {
 
   const handleDrop = (event) => {
     event.preventDefault();
-
-    const droppedFile = event.dataTransfer.files?.[0];
-
-    handleFile(droppedFile);
+    handleFile(event.dataTransfer.files?.[0]);
   };
 
   const handleUpload = async () => {
     if (!file) {
-      setError("Please select a ZIP file first.");
+      setError("Please select a ZIP file containing all four required files.");
       return;
     }
 
@@ -48,16 +105,16 @@ function UploadZone({ onUploadSuccess }) {
       setLoading(true);
       setError("");
 
-      const result = await uploadShapefile(file);
+      // Validate again before calling the backend.
+      await validateShapefileZip(file);
 
-      console.log("Metadata received:", result);
+      const result = await uploadShapefile(file);
 
       if (onUploadSuccess) {
         onUploadSuccess(result);
       }
     } catch (err) {
-      console.error(err);
-
+      console.error("Shapefile upload error:", err);
       setError(err.message || "Unable to upload the shapefile.");
     } finally {
       setLoading(false);
@@ -75,12 +132,13 @@ function UploadZone({ onUploadSuccess }) {
 
   return (
     <div>
-      {/* DROP ZONE */}
       {!file && (
         <div
           onDragOver={(event) => event.preventDefault()}
           onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => {
+            if (!loading) inputRef.current?.click();
+          }}
           className="group flex min-h-[190px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white px-5 py-8 transition hover:border-blue-400 hover:bg-blue-50/30"
         >
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50">
@@ -95,28 +153,30 @@ function UploadZone({ onUploadSuccess }) {
 
           <button
             type="button"
+            disabled={loading}
             onClick={(event) => {
               event.stopPropagation();
               inputRef.current?.click();
             }}
-            className="mt-3 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            className="mt-3 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
           >
-            Choose File
+            {loading ? "Checking ZIP..." : "Choose File"}
           </button>
 
-          <p className="mt-3 text-xs text-slate-400">Supported format: .zip</p>
+          <p className="mt-3 text-xs text-slate-400">
+            Supported format: .zip
+          </p>
 
           <input
             ref={inputRef}
             type="file"
-            accept=".zip"
+            accept=".zip,application/zip"
             hidden
             onChange={handleInputChange}
           />
         </div>
       )}
 
-      {/* SELECTED FILE */}
       {file && (
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between gap-4">
@@ -138,8 +198,10 @@ function UploadZone({ onUploadSuccess }) {
 
             <button
               type="button"
+              disabled={loading}
               onClick={removeFile}
-              className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+              aria-label="Remove selected ZIP file"
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
             >
               <X size={18} />
             </button>
@@ -147,14 +209,15 @@ function UploadZone({ onUploadSuccess }) {
         </div>
       )}
 
-      {/* ERROR */}
       {error && (
-        <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <div
+          role="alert"
+          className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+        >
           {error}
         </div>
       )}
 
-      {/* BUTTON */}
       {file && (
         <button
           type="button"
